@@ -24,6 +24,11 @@ class ExampleApi:
                      'source': 'span', 'trace_id': 'trace-1', 'span_id': 'span-1'}]
         self.traces = [{'trace_id': 'trace-1', 'task': 'Review migration', 'status': 'OK',
                         'span_count': 1, 'input_tokens': 100, 'output_tokens': 20, 'services': ['codex']}]
+        self.spans = [{'trace_id': 'trace-1', 'span_id': 'span-1', 'parent_span_id': None,
+                       'name': 'agent.run', 'status': 'OK', 'start_unix_nano': now-1_000_000,
+                       'end_unix_nano': now, 'service': 'codex', 'attributes': {'agent.task': 'Review migration'}}]
+        self.spans.append({**self.spans[0], 'span_id': 'span-2', 'parent_span_id': 'span-1', 'name': 'shell command'})
+        self.traces[0]['span_count'] = 2
         self.sessions = [
             {'source_id': 'source-1', 'session_id': 'session-1', 'service': 'codex', 'runtime': 'Codex',
              'task': 'Review migration', 'project': 'payments', 'model': 'model-a', 'last_activity': self.activity[0]},
@@ -52,7 +57,7 @@ class ExampleApi:
         if route.path == '/api/traces':
             return {'traces': matches(self.traces)}
         if route.path.startswith('/api/traces/'):
-            return {'trace_id': 'trace-1', 'summary': self.traces[0], 'spans': []}
+            return {'trace_id': 'trace-1', 'summary': self.traces[0], 'spans': self.spans}
         if route.path == '/api/findings':
             return {'findings': []}
         raise AssertionError(path)
@@ -85,6 +90,57 @@ class FeedSearchTest(unittest.TestCase):
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
+    async def test_compact_inspection_resize_and_error_triage(self):
+        feed = ManualFeed()
+        app = ObservatoryApp(feed)
+        async with app.run_test(size=(180, 50)) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.query_one('#span-tree').cursor_node.data['span_id'], 'span-1')
+            self.assertTrue(app.query_one('#span-tree').cursor_node.is_expanded)
+            self.assertEqual(app.inspector_signatures['span-info'][0], 'agent.run')
+            agents = app.query_one('#agent-table')
+            agents.move_cursor(row=1)
+            await pilot.pause()
+            self.assertEqual(app.selected_source, 'source-2')
+            for width, height in ((120, 40), (90, 32), (80, 24), (180, 50)):
+                await pilot.resize_terminal(width, height)
+                await pilot.pause()
+                self.assertEqual(app.selected_source, 'source-2')
+                self.assertEqual(agents.cursor_row, 1)
+                for page in ('agents', 'activity', 'mcp', 'traces', 'host'):
+                    app.action_page(page)
+                    await pilot.pause()
+                    table = app.query_one('#'+{'agents': 'agent', 'activity': 'activity', 'mcp': 'mcp', 'traces': 'trace', 'host': 'host'}[page]+'-table')
+                    self.assertGreaterEqual(table.size.height, 3, (page, width, height))
+                    self.assertLessEqual(table.virtual_size.width, table.scrollable_content_region.width, (page, width, height))
+
+            app.action_page('mcp')
+            await pilot.pause()
+            await pilot.click('#errors-mcp')
+            await pilot.pause()
+            self.assertEqual(app.query_one('#mcp-table').row_count, 0)
+            self.assertTrue(app.query_one('#mcp-trace').disabled)
+            self.assertEqual(len(feed.snapshot.mcp), 1)
+            self.assertIn('No failed MCP calls', app.inspector_signatures['mcp-detail'][0])
+            app.action_all()
+            await pilot.pause()
+            self.assertEqual(app.query_one('#mcp-table').row_count, 1)
+            self.assertFalse(app.query_one('#mcp-trace').disabled)
+
+            await pilot.resize_terminal(80, 24)
+            app.action_page('mcp')
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+            self.assertTrue(app.query_one('#mcp').has_class('expanded'))
+            self.assertEqual(app.focused.id, 'mcp-detail')
+            self.assertGreater(app.query_one('#mcp-detail').size.height, 8)
+            self.assertLessEqual(app.query_one('#mcp-detail').virtual_size.width, app.query_one('#mcp-detail').scrollable_content_region.width)
+            await pilot.press('escape')
+            await pilot.pause()
+            self.assertFalse(app.query_one('#mcp').has_class('expanded'))
+            self.assertEqual(app.focused.id, 'mcp-table')
+
     async def test_filters_stay_with_results_and_do_not_leak_between_tabs(self):
         feed = ManualFeed()
         app = ObservatoryApp(feed)

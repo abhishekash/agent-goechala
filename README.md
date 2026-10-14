@@ -42,10 +42,12 @@ These install the checkout as an isolated uv tool. Re-run the script after pulli
 
 - **Agents:** distinct sessions, project, current task, model, recent actions, and activity state.
 - **Activity:** readable user/assistant messages, shell commands, file changes, browser events, model use, and tool results.
-- **MCP:** server and tool calls with arguments, results, duration, and links to their trace and span.
+- **MCP:** server and tool calls with readable arguments and results, an Errors filter, latency, and direct links to the execution span.
 - **Traces:** parent/child spans, model usage, errors, and evidence for each operation.
 - **Host:** known local agent processes and basic resource use, shown separately from sessions.
 - **Web dashboard:** searchable live activity with the same local receiver.
+
+The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list.
 
 The receiver stores data in a local SQLite file. Native session capture is bounded and redacts recognizable credentials on a best-effort basis. Choose metadata-only capture with `--metadata-only`. See [Privacy and capture boundaries](docs/privacy.md).
 
