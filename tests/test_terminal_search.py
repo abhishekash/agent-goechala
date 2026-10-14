@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from observatory.terminal import Feed
-from observatory.terminal_ui import ObservatoryApp
+from observatory.terminal_ui import ObservatoryApp, decode
 
 
 class ExampleApi:
@@ -87,6 +87,32 @@ class FeedSearchTest(unittest.TestCase):
         self.assertEqual(len(feed.snapshot.mcp), 1)
         self.assertEqual(len(feed.snapshot.activity), 1)
         self.assertEqual(feed.snapshot.queries, {'activity': 'git status', 'mcp': 'missing-server', 'traces': 'release'})
+
+
+class EvidenceRenderingTest(unittest.TestCase):
+    def test_nested_json_text_is_unwrapped_and_multiline_diff_stays_formatted(self):
+        app = ObservatoryApp(ManualFeed())
+        diff = 'diff --git a/runner.py b/runner.py\n@@ -1 +1 @@\n-old()\n+new()'
+        payload = {'type': 'input_text', 'text': diff}
+        for _ in range(12):
+            payload = json.dumps({'recorded_content': payload})
+
+        decoded = decode(payload)
+        for _ in range(12):
+            decoded = decode(decoded['recorded_content'])
+        self.assertEqual(decoded['text'], diff)
+
+        class Capture:
+            blocks = []
+            def write(self, block):
+                self.blocks.append(block)
+
+        output = Capture()
+        app.write_evidence(output, 'Recorded Content', payload)
+        rendered = '\n'.join(getattr(block, 'plain', getattr(block, 'code', str(block)))
+                              for block in output.blocks)
+        self.assertIn('diff --git a/runner.py b/runner.py\n@@ -1 +1 @@\n-old()\n+new()', rendered)
+        self.assertNotIn(r'\n@@', rendered)
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):

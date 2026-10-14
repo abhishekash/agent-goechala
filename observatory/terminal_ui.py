@@ -62,7 +62,9 @@ def status(value):
 
 
 def decode(value):
-    for _ in range(3):
+    # Local logs often wrap the same event in several JSON-encoded transport
+    # envelopes. Unwrap those so newlines and typed text blocks reach the UI.
+    for _ in range(24):
         if not isinstance(value,str):
             break
         try:
@@ -562,17 +564,20 @@ class ObservatoryApp(App):
             log.write(Text('\n'+label.title(),style='bold #92b9eb'))
             log.write(Text('No entries' if isinstance(value,list) else 'Empty object'))
             return
-        if depth<7 and isinstance(value,dict):
+        if depth<16 and isinstance(value,dict):
             if value.get('type') in {'text','input_text','output_text'} and 'text' in value:
-                self.write_evidence(log,label,value['text'],depth+1);return
+                self.write_evidence(log,label,value['text'],depth);return
             for key,child in value.items():
                 self.write_evidence(log,str(key).replace('_',' '),child,depth+1)
             return
-        if depth<7 and isinstance(value,list):
+        if depth<16 and isinstance(value,list):
             for child in value:self.write_evidence(log,label,child,depth+1)
             return
+        if isinstance(value,(dict,list)):
+            log.write(Text('\n'+label.title(),style='bold #92b9eb'))
+            log.write(Syntax(json.dumps(value,ensure_ascii=False,indent=2),'json',word_wrap=True,background_color='#101720'))
+            return
         log.write(Text('\n'+label.title(),style='bold #92b9eb'))
-        if isinstance(value,(dict,list)):value=json.dumps(value,ensure_ascii=False,indent=2)
         if label.lower() in {'command','diff','patch','unified diff','code'}:
             lexer='diff' if 'diff' in label.lower() or label.lower()=='patch' else 'python' if label.lower()=='code' else 'bash'
             log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#101720'))
