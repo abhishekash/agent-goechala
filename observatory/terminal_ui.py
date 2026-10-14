@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import shutil
+import subprocess
+import sys
 import time
 import webbrowser
 from pathlib import Path
@@ -214,6 +218,30 @@ def copy_event_text(item):
     elif details:
         lines.append(str(details))
     return '\n'.join(lines)
+
+
+def write_system_clipboard(text):
+    """Write to the desktop clipboard when a native clipboard tool is available."""
+    candidates=[]
+    if sys.platform=='darwin' and shutil.which('pbcopy'):
+        candidates.append((['pbcopy'],'macOS'))
+    elif os.name=='nt' and shutil.which('clip.exe'):
+        candidates.append((['clip.exe'],'Windows'))
+    elif sys.platform.startswith('linux'):
+        if os.environ.get('WAYLAND_DISPLAY') and shutil.which('wl-copy'):
+            candidates.append((['wl-copy'],'Wayland'))
+        if os.environ.get('DISPLAY') and shutil.which('xclip'):
+            candidates.append((['xclip','-selection','clipboard','-i'],'X11'))
+        if os.environ.get('DISPLAY') and shutil.which('xsel'):
+            candidates.append((['xsel','--clipboard','--input'],'X11'))
+    for command,label in candidates:
+        try:
+            result=subprocess.run(command,input=text,text=True,capture_output=True,timeout=3,check=False)
+        except (OSError,subprocess.TimeoutExpired):
+            continue
+        if result.returncode==0:
+            return label
+    return None
 
 
 def headline(item):
@@ -1012,8 +1040,13 @@ class ObservatoryApp(App):
         if not item:
             self.notify('Select an activity or MCP call to copy.')
             return
-        self.copy_to_clipboard(copy_event_text(item))
-        self.notify('Event copied to clipboard. Paste it where you need it.')
+        text=copy_event_text(item)
+        method=write_system_clipboard(text)
+        if method:
+            self.notify(f'Event copied to {method} clipboard.')
+        else:
+            self.copy_to_clipboard(text)
+            self.notify('Sent copy request to terminal. Clipboard support depends on your terminal.')
     def collapse(self,page):
         self.query_one('#'+page,TabPane).remove_class('expanded')
         self.screen.remove_class('inspecting')
