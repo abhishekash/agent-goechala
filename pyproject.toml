@@ -7,6 +7,22 @@ name = "agent-observatory"
 version = "0.1.0"
 description = "Local agent trace receiver and investigation dashboard"
 requires-python = ">=3.11"
+readme = "README.md"
+keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Monitoring",
+]
+urls = {"Repository" = "https://github.com/abhishekash/agent-observatory", "Issues" = "https://github.com/abhishekash/agent-observatory/issues"}
 dependencies = ["textual>=8.2,<9"]
 
 [project.optional-dependencies]
