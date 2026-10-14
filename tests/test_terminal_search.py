@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from observatory.terminal import Feed
-from observatory.terminal_ui import ObservatoryApp, decode
+from observatory.terminal_ui import ObservatoryApp, decode, decode_nested
 
 
 class ExampleApi:
@@ -94,12 +94,13 @@ class EvidenceRenderingTest(unittest.TestCase):
         app = ObservatoryApp(ManualFeed())
         diff = 'diff --git a/runner.py b/runner.py\n@@ -1 +1 @@\n-old()\n+new()'
         payload = {'type': 'input_text', 'text': diff}
-        for _ in range(12):
-            payload = json.dumps({'recorded_content': payload})
+        for _ in range(24):
+            payload = {'wrapper': payload}
+        payload = json.dumps(payload)
 
         decoded = decode(payload)
-        for _ in range(12):
-            decoded = decode(decoded['recorded_content'])
+        for _ in range(24):
+            decoded = decode(decoded['wrapper'])
         self.assertEqual(decoded['text'], diff)
 
         class Capture:
@@ -111,8 +112,51 @@ class EvidenceRenderingTest(unittest.TestCase):
         app.write_evidence(output, 'Recorded Content', payload)
         rendered = '\n'.join(getattr(block, 'plain', getattr(block, 'code', str(block)))
                               for block in output.blocks)
-        self.assertIn('diff --git a/runner.py b/runner.py\n@@ -1 +1 @@\n-old()\n+new()', rendered)
+        self.assertTrue('diff --git a/runner.py b/runner.py\n@@ -1 +1 @@\n-old()\n+new()' in rendered)
         self.assertNotIn(r'\n@@', rendered)
+
+    def test_json_encoded_string_in_text_block_is_pretty_printed(self):
+        app = ObservatoryApp(ManualFeed())
+        payload = {'chunk_id': 'run-12', 'exit_code': 0, 'output': 'first line\nsecond line'}
+        encoded_string = json.dumps(json.dumps(payload))
+        self.assertEqual(decode(encoded_string), payload)
+        deeply_nested = {'type': 'input_text', 'text': encoded_string}
+        for _ in range(20):
+            deeply_nested = {'wrapper': deeply_nested}
+        normalized = decode_nested(deeply_nested)
+        for _ in range(20):
+            normalized = normalized['wrapper']
+        self.assertEqual(normalized['text'], payload)
+
+        class Capture:
+            blocks = []
+            def write(self, block):
+                self.blocks.append(block)
+
+        output = Capture()
+        app.write_evidence(output, 'Text', encoded_string, depth=1)
+        json_block = next(block for block in output.blocks if hasattr(block, 'code'))
+        self.assertIn('\n  "chunk_id": "run-12",', json_block.code)
+        self.assertIn('"output": "first line\\nsecond line"', json_block.code)
+
+    def test_recorded_input_text_with_embedded_json_uses_indented_json(self):
+        app = ObservatoryApp(ManualFeed())
+        payload = {'chunk_id': '2497a1', 'wall_time_seconds': 4.78, 'exit_code': 0,
+                   'output': 'main CI\nRun actions/setup-node\nRun node --check'}
+        recorded = json.dumps({'type': 'input_text', 'text': json.dumps(payload)})
+
+        class Capture:
+            def __init__(self):
+                self.blocks = []
+            def write(self, block):
+                self.blocks.append(block)
+
+        output = Capture()
+        app.write_evidence(output, 'Recorded Content', recorded)
+        json_block = next(block for block in output.blocks if hasattr(block, 'code'))
+        self.assertIn('\n  "chunk_id": "2497a1",', json_block.code)
+        self.assertIn('\n  "output": "main CI\\nRun actions/setup-node', json_block.code)
+        self.assertNotIn(r'\"chunk_id\"', json_block.code)
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):

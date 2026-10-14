@@ -73,8 +73,23 @@ def decode(value):
             break
         if isinstance(parsed,(dict,list)):
             value=parsed
+        elif isinstance(parsed,str) and parsed.lstrip().startswith(('{','[')):
+            # Some event producers JSON-encode the payload, then JSON-encode
+            # that encoded string again inside their text block.
+            value=parsed
         else:
             break
+    return value
+
+
+def decode_nested(value,depth=0):
+    """Decode JSON strings inside arbitrarily nested telemetry fields."""
+    value=decode(value)
+    if depth>=64:return value
+    if isinstance(value,dict):
+        return {key:decode_nested(child,depth+1) for key,child in value.items()}
+    if isinstance(value,list):
+        return [decode_nested(child,depth+1) for child in value]
     return value
 
 
@@ -554,7 +569,16 @@ class ObservatoryApp(App):
 
     def write_evidence(self,log,label,value,depth=0):
         if value is None or value=='':return
-        value=decode(value)
+        value=decode_nested(value)
+        # Native log adapters may wrap each piece of the same record in a
+        # one-key `recorded_content` envelope. Unwrap that without consuming
+        # the JSON nesting budget or repeating the label at every level.
+        if isinstance(value,dict) and len(value)==1:
+            key,child=next(iter(value.items()))
+            if key.lower() in {'recorded_content','content','payload'}:
+                self.write_evidence(log,label,child,depth);return
+            if key.lower()=='wrapper':
+                self.write_evidence(log,label,child,depth+1);return
         if depth==0 and isinstance(value,(dict,list)) and value:
             log.write(Text('\n'+label.upper(),style='bold #6ee7c2'))
             if label.lower()=='arguments':
@@ -564,13 +588,19 @@ class ObservatoryApp(App):
             log.write(Text('\n'+label.title(),style='bold #92b9eb'))
             log.write(Text('No entries' if isinstance(value,list) else 'Empty object'))
             return
-        if depth<16 and isinstance(value,dict):
-            if value.get('type') in {'text','input_text','output_text'} and 'text' in value:
-                self.write_evidence(log,label,value['text'],depth);return
+        if isinstance(value,dict) and value.get('type') in {'text','input_text','output_text'} and 'text' in value:
+            self.write_evidence(log,label,value['text'],depth+1);return
+        # Any structured value nested in captured evidence is easier to scan
+        # as JSON than as a sequence of flattened label/value rows. This also
+        # handles JSON strings stored under fields such as `output` or `text`.
+        if depth and isinstance(value,(dict,list)):
+            log.write(Syntax(json.dumps(value,ensure_ascii=False,indent=2),'json',word_wrap=True,background_color='#101720'))
+            return
+        if depth<64 and isinstance(value,dict):
             for key,child in value.items():
                 self.write_evidence(log,str(key).replace('_',' '),child,depth+1)
             return
-        if depth<16 and isinstance(value,list):
+        if depth<64 and isinstance(value,list):
             for child in value:self.write_evidence(log,label,child,depth+1)
             return
         if isinstance(value,(dict,list)):
