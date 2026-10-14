@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from observatory.terminal import Feed
-from observatory.terminal_ui import ObservatoryApp, decode, decode_nested, headline
+from observatory.terminal_ui import ObservatoryApp, copy_event_text, decode, decode_nested, headline
 
 
 class ExampleApi:
@@ -205,6 +205,42 @@ class EvidenceRenderingTest(unittest.TestCase):
         readable_text = next(block for block in output.blocks if getattr(block, 'plain', '') == output_text)
         self.assertIn('Total output lines: 3\nRun CI', readable_text.plain)
         self.assertNotIn(r'\nTotal output lines', readable_text.plain)
+
+    def test_embedded_json_in_recorded_log_is_formatted(self):
+        app = ObservatoryApp(ManualFeed())
+        output_text = 'Warning: truncated output\nTotal output lines: 1'
+        recorded = 'Script completed\nWall time 0.0 seconds\nOutput:\n{"output":' + json.dumps(output_text) + ',"session_id":6396}'
+
+        class Capture:
+            def __init__(self):
+                self.blocks = []
+            def write(self, block):
+                self.blocks.append(block)
+
+        output = Capture()
+        app.write_evidence(output, 'Recorded Content', recorded)
+        json_block = next(block for block in output.blocks if hasattr(block, 'code'))
+        self.assertIn('\n  "output": "[multiline text · 2 lines shown below]"', json_block.code)
+        self.assertTrue(any(getattr(block, 'plain', '') == output_text for block in output.blocks))
+
+    def test_copy_event_text_expands_embedded_json(self):
+        readable_output = 'Warning: truncated output\nTotal output lines: 1'
+        item = {'domain': 'tool', 'action': 'wait', 'subject': 'wait', 'service': 'codex',
+                'result': 'observed', 'time_unix_nano': time.time_ns(),
+                'detail': '{"output":' + json.dumps(readable_output) + ',"session_id":6396}'}
+        copied = copy_event_text(item)
+        self.assertIn('"output": "[multiline text · 2 lines shown below]"', copied)
+        self.assertIn(readable_output, copied)
+        self.assertNotIn(r'\nTotal output lines', copied)
+
+    def test_copy_mcp_call_includes_arguments_and_response(self):
+        item = {'domain': 'mcp', 'server': 'github', 'tool': 'search_issues',
+                'status': 'OK', 'arguments': {'query': 'formatting'},
+                'output': {'matches': 2}}
+        copied = copy_event_text(item)
+        self.assertIn('github / search_issues', copied)
+        self.assertIn('"query": "formatting"', copied)
+        self.assertIn('"matches": 2', copied)
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):

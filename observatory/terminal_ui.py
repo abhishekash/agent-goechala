@@ -132,8 +132,35 @@ def heredoc_script(command):
     return language,title,'\n'.join(lines[1:-1])
 
 
-def write_json(log,value):
-    """Render indented JSON and move multiline string values into readable blocks."""
+def embedded_json(text):
+    """Split prose from complete JSON objects embedded in a text record."""
+    decoder=json.JSONDecoder()
+    segments=[]
+    cursor=0
+    index=0
+    while index<len(text):
+        if text[index] not in '{[':
+            index+=1
+            continue
+        try:
+            value,end=decoder.raw_decode(text,index)
+        except (ValueError,TypeError):
+            index+=1
+            continue
+        if not isinstance(value,(dict,list)) or end<=cursor:
+            index+=1
+            continue
+        if text[cursor:index]:segments.append(('text',text[cursor:index]))
+        segments.append(('json',value))
+        cursor=end
+        index=end
+    if not segments:return [('text',text)]
+    if text[cursor:]:segments.append(('text',text[cursor:]))
+    return segments
+
+
+def format_json(value):
+    """Return indented JSON and multiline string fields for readable display."""
     text_values=[]
     def prepare(item,path=''):
         if isinstance(item,dict):
@@ -146,11 +173,47 @@ def write_json(log,value):
             return f'[multiline text · {line_count} lines shown below]'
         return item
 
-    formatted=json.dumps(prepare(value),ensure_ascii=False,indent=2)
+    return json.dumps(prepare(value),ensure_ascii=False,indent=2),text_values
+
+
+def write_json(log,value):
+    """Render indented JSON and move multiline string values into readable blocks."""
+    formatted,text_values=format_json(value)
     log.write(Syntax(formatted,'json',word_wrap=True,background_color='#101720'))
     for path,content in text_values:
         log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #92b9eb'))
         log.write(Text(content))
+
+
+def copy_event_text(item):
+    """Build a readable plain-text export of one selected activity or MCP event."""
+    is_mcp=bool(item.get('server') or item.get('tool') or item.get('domain')=='mcp')
+    title=f"{item.get('server') or 'MCP'} / {item.get('tool') or 'tool'}" if is_mcp else headline(item)
+    lines=[title,f"Agent: {item.get('service') or 'Not reported'}",
+           f"Type: {item.get('domain') or ('mcp' if is_mcp else 'Not reported')}",
+           f"Result: {item.get('result') or item.get('status') or 'Not reported'}",
+           f"When: {when(item['time_unix_nano']) if item.get('time_unix_nano') else 'Not reported'}",
+           f"Duration: {timing(item.get('duration_ms'))}"]
+    if item.get('trace_id'):lines.append(f"Trace ID: {item['trace_id']}")
+    if item.get('span_id'):lines.append(f"Span ID: {item['span_id']}")
+    lines.append('\nRecorded content')
+    def append_json(value):
+        formatted,text_values=format_json(value)
+        lines.append(formatted)
+        for path,content in text_values:lines.extend((f'\n{path}',content))
+    if is_mcp:
+        details={key:item.get(key) for key in ('server','tool','method','arguments','output') if item.get(key) is not None}
+    else:
+        details=decode_nested(item.get('detail') or '')
+    if isinstance(details,(dict,list)):
+        append_json(details)
+    elif isinstance(details,str):
+        for kind,content in embedded_json(details):
+            if kind=='json':append_json(content)
+            elif content.strip():lines.append(content.strip('\n'))
+    elif details:
+        lines.append(str(details))
+    return '\n'.join(lines)
 
 
 def headline(item):
@@ -365,6 +428,7 @@ class ObservatoryApp(App):
     .inspecting #summary, .inspecting #controls { display: none; }
     '''
     BINDINGS=[Binding('/','search','Search'),Binding('e','expand','Expand'),Binding('t','open_trace','Trace'),
+              Binding('c','copy','Copy event'),
               Binding('p','pause','Pause'),Binding('a','all','Reset',show=False),Binding('v','reviews','Reviews',show=False),
               Binding('b','browser','Web'),Binding('q','quit','Quit'),Binding('escape','back','Back',show=False),
               Binding('s','focus_agent','Focus agent',show=False),Binding('1','page("agents")','Agents',show=False),
@@ -430,6 +494,7 @@ class ObservatoryApp(App):
                         yield RichLog(id='activity-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         with Horizontal(classes='inspector-actions'):
                             yield Button(Text('Open trace · t'),id='activity-trace')
+                            yield Button(Text('Copy event · c'),id='activity-copy')
                             yield Button(Text('Expand · e'),id='expand-activity',classes='expand-button')
             with TabPane('3  MCP Calls',id='mcp'):
                 with Horizontal(classes='split'):
@@ -438,6 +503,7 @@ class ObservatoryApp(App):
                         yield RichLog(id='mcp-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         with Horizontal(classes='inspector-actions'):
                             yield Button(Text('Open trace · t'),id='mcp-trace')
+                            yield Button(Text('Copy call · c'),id='mcp-copy')
                             yield Button(Text('Expand · e'),id='expand-mcp',classes='expand-button')
             with TabPane('4  Traces',id='traces'):
                 with Horizontal(classes='split'):
@@ -652,6 +718,16 @@ class ObservatoryApp(App):
     def write_evidence(self,log,label,value,depth=0):
         if value is None or value=='':return
         value=decode_nested(value)
+        if isinstance(value,str) and label.casefold() in {'recorded content','text','output','response'}:
+            segments=embedded_json(value)
+            if any(kind=='json' for kind,_ in segments):
+                log.write(Text('\n'+label.title(),style='bold #92b9eb'))
+                for kind,content in segments:
+                    if kind=='text':
+                        if content.strip():log.write(Text(content.strip('\n')))
+                    else:
+                        write_json(log,content)
+                return
         # Native log adapters may wrap each piece of the same record in a
         # one-key `recorded_content` envelope. Unwrap that without consuming
         # the JSON nesting budget or repeating the label at every level.
@@ -915,6 +991,7 @@ class ObservatoryApp(App):
             field.value='';field.focus()
         elif event.button.id=='agent-open':self.action_focus_agent()
         elif event.button.id in {'activity-trace','mcp-trace'}:self.action_open_trace()
+        elif event.button.id in {'activity-copy','mcp-copy'}:self.action_copy()
 
     def action_pause(self):
         self.feed.paused=not self.feed.paused;self.query_one('#pause',Button).label='Resume' if self.feed.paused else 'Pause';self.feed.request_refresh();self.refresh_data()
@@ -926,6 +1003,17 @@ class ObservatoryApp(App):
             self.query_one('#search-'+page,Input).focus()
     def action_back(self):
         self.action_page(self.query_one('#pages',TabbedContent).active)
+    def action_copy(self):
+        page=self.query_one('#pages',TabbedContent).active
+        if page=='mcp':
+            item=self.table_data.get('mcp-table',{}).get(self.selected_mcp)
+        else:
+            item=self.table_data.get('activity-table',{}).get(self.selected_activity)
+        if not item:
+            self.notify('Select an activity or MCP call to copy.')
+            return
+        self.copy_to_clipboard(copy_event_text(item))
+        self.notify('Event copied to clipboard. Paste it where you need it.')
     def collapse(self,page):
         self.query_one('#'+page,TabPane).remove_class('expanded')
         self.screen.remove_class('inspecting')
