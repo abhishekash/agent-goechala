@@ -1,0 +1,48 @@
+# Local OTLP relay for agent SDKs. The Collector listens on loopback and
+# forwards all three signals into Agent Observatory's OTLP/HTTP receiver.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4319
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  resourcedetection/system:
+    detectors: [system]
+    timeout: 2s
+    override: false
+    system:
+      resource_attributes:
+        host.arch:
+          enabled: true
+        os.name:
+          enabled: true
+        os.version:
+          enabled: true
+  batch:
+    timeout: 1s
+
+exporters:
+  otlphttp/observatory:
+    endpoint: http://127.0.0.1:4318
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection/system, batch]
+      exporters: [otlphttp/observatory]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection/system, batch]
+      exporters: [otlphttp/observatory]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection/system, batch]
+      exporters: [otlphttp/observatory]

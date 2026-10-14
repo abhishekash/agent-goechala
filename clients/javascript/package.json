@@ -1,0 +1,16 @@
+{
+  "name": "@agent-observatory/client",
+  "version": "0.1.0",
+  "description": "Dependency-free Node.js instrumentation client for Agent Observatory",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-observatory"
+version = "0.1.0"
+description = "Local agent trace receiver and investigation dashboard"
+requires-python = ">=3.11"
+dependencies = ["textual>=8.2,<9"]
+
+[project.optional-dependencies]
+auto = [
+    "opentelemetry-sdk>=1.27,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
+    "openinference-instrumentation-openai>=0.1",
+    "openinference-instrumentation-anthropic>=0.1",
+    "openinference-instrumentation-langchain>=0.1",
+]
+langchain = ["langchain-core>=0.3.9,<2"]
+openai-agents = ["openai-agents>=0.1.0,<2"]
+
+[project.scripts]
+agent-observatory = "observatory.__main__:main"
+
+[tool.setuptools.package-data]
+observatory = ["index.html", "setup.js", "setup.css", "activity.js", "activity.css"]
+
+[tool.setuptools.packages.find]
+include = ["observatory*"]
