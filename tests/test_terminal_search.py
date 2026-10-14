@@ -6,10 +6,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
-
 from observatory.terminal import Feed
-from observatory.terminal_ui import (ObservatoryApp, copy_event_text, decode, decode_nested,
-                                     headline, write_system_clipboard)
+from observatory.terminal_ui import (ObservatoryApp, ObservatoryScreen, SelectableRichLog,
+                                     copy_event_text, decode, decode_nested, headline,
+                                     write_system_clipboard)
 
 
 class ExampleApi:
@@ -272,6 +272,33 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertEqual(app.selected_source, 'source-2')
                 self.assertEqual(agents.cursor_row, 1)
+            app.action_page('activity')
+            await pilot.pause()
+            detail = app.query_one('#activity-detail')
+            self.assertIsInstance(detail, SelectableRichLog)
+            self.assertIsInstance(app.screen, ObservatoryScreen)
+            detail.clear();detail.write('copy this text')
+            await pilot.pause()
+            # Textual routes mouse drags through Screen selection. Use absolute
+            # screen coordinates as the terminal driver does, and verify the
+            # RichLog contributes character offsets for the selected line.
+            from textual.events import MouseDown, MouseMove, MouseUp
+            start_x, start_y = detail.region.x + 2, detail.region.y
+            for event_type, pointer_x in (
+                (MouseDown, start_x),
+                (MouseMove, start_x + 9),
+                (MouseUp, start_x + 9),
+            ):
+                app.screen._forward_event(event_type(
+                    widget=None, x=pointer_x, y=start_y,
+                    delta_x=pointer_x - start_x, delta_y=0, button=1,
+                    shift=False, meta=False, ctrl=False,
+                    screen_x=pointer_x, screen_y=start_y,
+                ))
+                await pilot.pause()
+            self.assertEqual(app.screen.get_selected_text(), 'py this te')
+            with patch('observatory.terminal_ui.write_system_clipboard',return_value='X11'):
+                app.screen.action_copy_text()
                 for page in ('agents', 'activity', 'mcp', 'traces', 'host'):
                     app.action_page(page)
                     await pilot.pause()

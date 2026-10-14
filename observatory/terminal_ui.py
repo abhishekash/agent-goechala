@@ -11,6 +11,9 @@ import time
 import webbrowser
 from pathlib import Path
 
+from rich.cells import get_character_cell_size
+from rich.segment import Segment
+from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
@@ -18,6 +21,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
 from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
@@ -350,6 +354,51 @@ class ResultsTable(DataTable):
         self.scroll_to(x=0,y=scroll.y,animate=False)
 
 
+class SelectableRichLog(RichLog):
+    """Expose RichLog's rendered lines to Textual's pointer text selection."""
+    def render_line(self,y):
+        strip=super().render_line(y)
+        source_y=self.scroll_offset.y+y
+        source_x=self.scroll_offset.x
+        prefix_chars=0
+        prefix_cells=0
+        if source_x and source_y<len(self.lines):
+            for segment in self.lines[source_y]:
+                for character in segment.text:
+                    width=get_character_cell_size(character)
+                    if prefix_cells+width>source_x:break
+                    prefix_cells+=width
+                    prefix_chars+=1
+                if prefix_cells>=source_x:break
+        segments=[]
+        char_offset=prefix_chars
+        for segment in strip:
+            style=(segment.style or Style.null())+Style(meta={'offset':(char_offset,source_y)})
+            segments.append(Segment(segment.text,style))
+            char_offset+=len(segment.text)
+        return type(strip)(segments,strip.cell_length)
+
+    def get_selection(self,selection):
+        if not self.lines:return None
+        text='\n'.join(line.render(self.app.console) for line in self.lines)
+        return selection.extract(text),'\n'
+
+
+class ObservatoryScreen(Screen):
+    """Copy pointer-selected text through the desktop clipboard when possible."""
+    def action_copy_text(self):
+        selected=self.get_selected_text()
+        if selected is None:
+            self.app.notify('Drag across text to select it, then press Ctrl+C.')
+            return
+        method=write_system_clipboard(selected)
+        if method:
+            self.app.notify(f'Selected text copied to {method} clipboard.')
+        else:
+            self.app.copy_to_clipboard(selected)
+            self.app.notify('Sent copy request to terminal. Clipboard support depends on your terminal.')
+
+
 class ObservatoryApp(App):
     TITLE='Agent Observatory'
     AUTO_FOCUS='#agent-table'
@@ -512,14 +561,14 @@ class ObservatoryApp(App):
                 yield self.results('agents','agent-table','Filter agents by task, project, model, or session…')
                 with Horizontal(id='agent-bottom'):
                     with Vertical(id='agent-info'):
-                        yield RichLog(id='agent-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                        yield SelectableRichLog(id='agent-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         yield Button(Text('Session activity  ·  s'),id='agent-open')
                     yield ResultsTable(id='agent-actions',classes='box',cursor_type='row',zebra_stripes=True)
             with TabPane('2  Activity',id='activity'):
                 with Horizontal(classes='split'):
                     yield self.results('activity','activity-table','Filter activity by command, message, tool, or path…','list')
                     with Vertical(id='activity-inspector',classes='detail box'):
-                        yield RichLog(id='activity-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                        yield SelectableRichLog(id='activity-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         with Horizontal(classes='inspector-actions'):
                             yield Button(Text('Open trace · t'),id='activity-trace')
                             yield Button(Text('Copy event · c'),id='activity-copy')
@@ -528,7 +577,7 @@ class ObservatoryApp(App):
                 with Horizontal(classes='split'):
                     yield self.results('mcp','mcp-table','Filter MCP calls by server, tool, arguments, or result…','list')
                     with Vertical(id='mcp-inspector',classes='detail box'):
-                        yield RichLog(id='mcp-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                        yield SelectableRichLog(id='mcp-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         with Horizontal(classes='inspector-actions'):
                             yield Button(Text('Open trace · t'),id='mcp-trace')
                             yield Button(Text('Copy call · c'),id='mcp-copy')
@@ -538,16 +587,19 @@ class ObservatoryApp(App):
                     yield self.results('traces','trace-table','Filter traces by task, model, service, or ID…','list')
                     with Vertical(id='trace-detail',classes='box'):
                         yield Tree('Select a trace',id='span-tree')
-                        yield RichLog(id='span-info',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                        yield SelectableRichLog(id='span-info',min_width=1,wrap=True,markup=False,auto_scroll=False)
             with TabPane('5  Host',id='host'):
                 yield self.results('host','host-table','Filter processes by name, PID, project, or state…')
-                yield RichLog(id='host-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                yield SelectableRichLog(id='host-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
             if self.agent:
                 with TabPane('6  Output',id='output'):
                     yield Static('stdout / stderr from the agent launched by this cockpit.',id='output-state',classes='hint')
-                    yield RichLog(id='agent-output',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=True)
+                    yield SelectableRichLog(id='agent-output',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=True)
         yield Static('Connecting to receiver…',id='health',markup=False)
         yield Footer()
+
+    def get_default_screen(self):
+        return ObservatoryScreen()
 
     def on_mount(self):
         columns={
