@@ -105,7 +105,8 @@ class EvidenceRenderingTest(unittest.TestCase):
         self.assertEqual(decoded['text'], diff)
 
         class Capture:
-            blocks = []
+            def __init__(self):
+                self.blocks = []
             def write(self, block):
                 self.blocks.append(block)
 
@@ -138,7 +139,8 @@ class EvidenceRenderingTest(unittest.TestCase):
         app.write_evidence(output, 'Text', encoded_string, depth=1)
         json_block = next(block for block in output.blocks if hasattr(block, 'code'))
         self.assertIn('\n  "chunk_id": "run-12",', json_block.code)
-        self.assertIn('"output": "first line\\nsecond line"', json_block.code)
+        self.assertIn('"output": "[multiline text · 2 lines shown below]"', json_block.code)
+        self.assertTrue(any(getattr(block, 'plain', '') == 'first line\nsecond line' for block in output.blocks))
 
     def test_recorded_input_text_with_embedded_json_uses_indented_json(self):
         app = ObservatoryApp(ManualFeed())
@@ -156,7 +158,8 @@ class EvidenceRenderingTest(unittest.TestCase):
         app.write_evidence(output, 'Recorded Content', recorded)
         json_block = next(block for block in output.blocks if hasattr(block, 'code'))
         self.assertIn('\n  "chunk_id": "2497a1",', json_block.code)
-        self.assertIn('\n  "output": "main CI\\nRun actions/setup-node', json_block.code)
+        self.assertIn('"output": "[multiline text · 3 lines shown below]"', json_block.code)
+        self.assertTrue(any(getattr(block, 'plain', '').startswith('main CI\nRun actions/setup-node') for block in output.blocks))
         self.assertNotIn(r'\"chunk_id\"', json_block.code)
 
     def test_shell_wrapped_python_heredoc_shows_readable_source(self):
@@ -183,6 +186,25 @@ class EvidenceRenderingTest(unittest.TestCase):
         item = {'domain': 'tool', 'action': 'execute_tool', 'subject': 'exec',
                 'detail': json.dumps({'Command': '/usr/bin/zsh -lc ' + shlex.quote(command)})}
         self.assertEqual(headline(item), 'Python script')
+
+    def test_multiline_json_values_are_shown_as_readable_text_blocks(self):
+        app = ObservatoryApp(ManualFeed())
+        output_text = 'Warning: truncated output\nTotal output lines: 3\nRun CI · Python 3.14'
+        payload = {'output': output_text, 'exit_code': 0}
+
+        class Capture:
+            def __init__(self):
+                self.blocks = []
+            def write(self, block):
+                self.blocks.append(block)
+
+        output = Capture()
+        app.write_evidence(output, 'Recorded Content', json.dumps(payload), depth=1)
+        json_block = next(block for block in output.blocks if hasattr(block, 'code'))
+        self.assertIn('"output": "[multiline text · 3 lines shown below]"', json_block.code)
+        readable_text = next(block for block in output.blocks if getattr(block, 'plain', '') == output_text)
+        self.assertIn('Total output lines: 3\nRun CI', readable_text.plain)
+        self.assertNotIn(r'\nTotal output lines', readable_text.plain)
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):

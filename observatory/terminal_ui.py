@@ -132,6 +132,27 @@ def heredoc_script(command):
     return language,title,'\n'.join(lines[1:-1])
 
 
+def write_json(log,value):
+    """Render indented JSON and move multiline string values into readable blocks."""
+    text_values=[]
+    def prepare(item,path=''):
+        if isinstance(item,dict):
+            return {key:prepare(child,f'{path}.{key}' if path else str(key)) for key,child in item.items()}
+        if isinstance(item,list):
+            return [prepare(child,f'{path}[{index}]') for index,child in enumerate(item)]
+        if isinstance(item,str) and '\n' in item:
+            text_values.append((path or 'Text value',item))
+            line_count=len(item.splitlines())
+            return f'[multiline text · {line_count} lines shown below]'
+        return item
+
+    formatted=json.dumps(prepare(value),ensure_ascii=False,indent=2)
+    log.write(Syntax(formatted,'json',word_wrap=True,background_color='#101720'))
+    for path,content in text_values:
+        log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #92b9eb'))
+        log.write(Text(content))
+
+
 def headline(item):
     domain=item.get('domain') or 'tool'
     subject=str(item.get('subject') or item.get('action') or 'Observed activity')
@@ -643,7 +664,7 @@ class ObservatoryApp(App):
         if depth==0 and isinstance(value,(dict,list)) and value:
             log.write(Text('\n'+label.upper(),style='bold #6ee7c2'))
             if label.lower()=='arguments':
-                log.write(Syntax(json.dumps(value,ensure_ascii=False,indent=2),'json',word_wrap=True,background_color='#101720'))
+                write_json(log,value)
                 return
         if isinstance(value,(dict,list)) and not value:
             log.write(Text('\n'+label.title(),style='bold #92b9eb'))
@@ -655,7 +676,7 @@ class ObservatoryApp(App):
         # as JSON than as a sequence of flattened label/value rows. This also
         # handles JSON strings stored under fields such as `output` or `text`.
         if depth and isinstance(value,(dict,list)):
-            log.write(Syntax(json.dumps(value,ensure_ascii=False,indent=2),'json',word_wrap=True,background_color='#101720'))
+            write_json(log,value)
             return
         if depth<64 and isinstance(value,dict):
             for key,child in value.items():
@@ -666,7 +687,7 @@ class ObservatoryApp(App):
             return
         if isinstance(value,(dict,list)):
             log.write(Text('\n'+label.title(),style='bold #92b9eb'))
-            log.write(Syntax(json.dumps(value,ensure_ascii=False,indent=2),'json',word_wrap=True,background_color='#101720'))
+            write_json(log,value)
             return
         log.write(Text('\n'+label.title(),style='bold #92b9eb'))
         if label.lower()=='command':
