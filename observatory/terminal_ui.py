@@ -135,6 +135,28 @@ def heredoc_script(command):
 def headline(item):
     domain=item.get('domain') or 'tool'
     subject=str(item.get('subject') or item.get('action') or 'Observed activity')
+    if domain=='tool' and subject.casefold() in {'exec','execute','shell'}:
+        details=decode_nested(item.get('detail') or '')
+        def find_command(value):
+            if isinstance(value,dict):
+                for key,child in value.items():
+                    if str(key).casefold() in {'command','cmd'} and isinstance(child,str):
+                        return child
+                for child in value.values():
+                    found=find_command(child)
+                    if found:return found
+            elif isinstance(value,list):
+                for child in value:
+                    found=find_command(child)
+                    if found:return found
+            return None
+        command=find_command(details)
+        if command:
+            command=shell_command(command)
+            script=heredoc_script(command)
+            if script:return script[1]
+            first=command.splitlines()[0] if command.splitlines() else command
+            return clean(first)
     if domain=='shell':
         try:
             args=shlex.split(subject)

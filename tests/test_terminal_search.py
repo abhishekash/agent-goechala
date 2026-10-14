@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from observatory.terminal import Feed
-from observatory.terminal_ui import ObservatoryApp, decode, decode_nested
+from observatory.terminal_ui import ObservatoryApp, decode, decode_nested, headline
 
 
 class ExampleApi:
@@ -177,6 +177,12 @@ class EvidenceRenderingTest(unittest.TestCase):
         self.assertEqual(code_block.code, source)
         self.assertEqual(code_block.lexer.name, 'Python')
         self.assertNotIn("/usr/bin/zsh", '\n'.join(getattr(block, 'plain', '') for block in output.blocks))
+
+    def test_generic_exec_activity_row_uses_command_summary(self):
+        command = "python - <<'PY'\nprint('ok')\nPY"
+        item = {'domain': 'tool', 'action': 'execute_tool', 'subject': 'exec',
+                'detail': json.dumps({'Command': '/usr/bin/zsh -lc ' + shlex.quote(command)})}
+        self.assertEqual(headline(item), 'Python script')
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
