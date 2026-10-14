@@ -161,6 +161,9 @@ class Snapshot:
     sessions: list = field(default_factory=list)
     mcp: list = field(default_factory=list)
     mcp_available: bool = True
+    activity_results: list | None = None
+    mcp_results: list | None = None
+    queries: dict = field(default_factory=dict)
 
 
 class Feed:
@@ -169,6 +172,8 @@ class Feed:
         self.snapshot = Snapshot()
         self.service = ""
         self.query = ""
+        self.activity_query = ""
+        self.mcp_query = ""
         self.errors_only = False
         self.selected_trace = None
         self.selected_span_id = None
@@ -186,6 +191,7 @@ class Feed:
 
     def refresh(self):
         service, query, errors_only, selected = self.service, self.query, self.errors_only, self.selected_trace
+        activity_query, mcp_query = self.activity_query, self.mcp_query
         requested_trace, requested_span = selected, self.selected_span_id
         session_id, include_reviews = self.session_id, self.include_reviews
         try:
@@ -193,24 +199,28 @@ class Feed:
             totals = self.api.get("/api/metrics")
             agents = self.api.get("/api/connections")["connections"]
             try:
-                activity = self.api.get("/api/activity?" + urlencode({"limit": 300, "service": service, "session_id": session_id, "q": query}))["activity"]
+                activity_params = {"limit": 300, "service": service, "session_id": session_id}
+                activity = self.api.get("/api/activity?" + urlencode(activity_params))["activity"]
+                activity_results = self.api.get("/api/activity?" + urlencode({**activity_params, "q": activity_query}))["activity"] if activity_query else activity
             except urllib.error.HTTPError as exc:
                 if exc.code != 404:
                     raise
-                activity = []
-            scope = (service, session_id, query)
+                activity, activity_results = [], []
+            scope = (service, session_id, mcp_query)
             if self.extra_cache is None or scope != self.extra_scope or time.monotonic()-self.extra_updated>3:
                 sessions = self.api.get('/api/sessions?limit=500')['sessions']
                 try:
-                    mcp = self.api.get('/api/mcp?'+urlencode({'limit':100,'service':service,'session_id':session_id,'q':query}))['calls']
+                    mcp_params = {'limit':100,'service':service,'session_id':session_id}
+                    mcp = self.api.get('/api/mcp?'+urlencode(mcp_params))['calls']
+                    mcp_results = self.api.get('/api/mcp?'+urlencode({**mcp_params,'q':mcp_query}))['calls'] if mcp_query else mcp
                     mcp_available = True
                 except urllib.error.HTTPError as exc:
                     if exc.code!=404:
                         raise
-                    mcp,mcp_available=[],False
-                self.extra_cache = sessions,mcp,mcp_available
+                    mcp,mcp_results,mcp_available=[],[],False
+                self.extra_cache = sessions,mcp,mcp_results,mcp_available
                 self.extra_scope,self.extra_updated = scope,time.monotonic()
-            sessions,mcp,mcp_available=self.extra_cache
+            sessions,mcp,mcp_results,mcp_available=self.extra_cache
             params = {"limit": 200, "service": service, "session_id": session_id, "q": query}
             if errors_only:
                 params["status"] = "ERROR"
@@ -218,7 +228,9 @@ class Feed:
             if not include_reviews:
                 traces = [item for item in traces if 'codex-review' not in item.get('services',[])]
                 activity = [item for item in activity if item.get('service')!='codex-review']
+                activity_results = [item for item in activity_results if item.get('service')!='codex-review']
                 mcp = [item for item in mcp if item.get('service')!='codex-review']
+                mcp_results = [item for item in mcp_results if item.get('service')!='codex-review']
             traces,activity = traces[:100],activity[:200]
             if not self.pinned_trace and selected not in {item["trace_id"] for item in traces}:
                 selected = traces[0]["trace_id"] if traces else None
@@ -237,7 +249,7 @@ class Feed:
             if not selected:
                 findings = self.api.get("/api/findings?limit=8")["findings"]
             # A filter changed while the HTTP reads were in flight; discard the older view.
-            if (service, query, errors_only, session_id, include_reviews) != (self.service, self.query, self.errors_only, self.session_id, self.include_reviews):
+            if (service, query, activity_query, mcp_query, errors_only, session_id, include_reviews) != (self.service, self.query, self.activity_query, self.mcp_query, self.errors_only, self.session_id, self.include_reviews):
                 self.wake.set()
                 return
             if self.selected_trace!=requested_trace or self.selected_span_id!=requested_span:
@@ -245,7 +257,9 @@ class Feed:
                 return
             self.selected_trace = selected
             self.snapshot = Snapshot(totals, agents, traces, detail, findings, updated=time.time(), local_status=local_status, activity=activity,
-                                     sessions=sessions,mcp=mcp,mcp_available=mcp_available)
+                                     sessions=sessions,mcp=mcp,mcp_available=mcp_available,
+                                     activity_results=activity_results[:200],mcp_results=mcp_results,
+                                     queries={'activity':activity_query,'mcp':mcp_query,'traces':query})
         except Exception as exc:
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
                 message = "Receiver requires authentication. Set OBSERVATORY_TOKEN and restart."

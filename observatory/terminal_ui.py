@@ -135,17 +135,24 @@ class ObservatoryApp(App):
     Footer { background: #14243a; }
     #summary { height: 4; margin: 1 2 0 2; }
     .stat { width: 1fr; background: #142238; border-left: thick #3f658f; padding: 0 2; margin-right: 1; }
-    #controls { height: 3; margin: 1 2 0 2; }
-    #search { width: 1fr; margin-right: 1; }
-    #scope { width: 28; margin-right: 1; }
+    #controls { height: 3; margin: 0 2; align-vertical: middle; }
+    #scope-label { width: 7; height: 1; margin-top: 1; color: #91a7c3; }
+    #scope { width: 36; margin-right: 1; }
+    #controls-spacer { width: 1fr; }
     #reviews { width: 14; border: none; margin-top: 1; }
     #pause { min-width: 9; width: 9; }
     #pages { height: 1fr; margin: 0 2; }
-    TabPane { padding: 1 0 0 0; }
+    TabPane { padding: 0; }
     ContentSwitcher { height: 1fr; }
     .hint { height: 2; color: #91a7c3; }
     .box { border: round #2d4665; background: #101e31; padding: 0 1; }
     .box:focus-within { border: round #6c9cd6; }
+    .results { height: 1fr; }
+    .searchbar { height: 3; }
+    .view-search { width: 1fr; margin-right: 1; background: #14243a; border: tall #2d4665; }
+    .view-search:focus { border: tall #6c9cd6; }
+    .clear-search { width: 9; min-width: 9; }
+    .search-status { height: 1; color: #91a7c3; padding: 0 1; }
     DataTable { background: #101e31; height: 1fr; }
     DataTable > .datatable--header { background: #1b304c; color: #9abbe6; text-style: bold; }
     DataTable > .datatable--cursor { background: #294b73; color: white; }
@@ -171,18 +178,19 @@ class ObservatoryApp(App):
     .narrow #summary { margin: 0 1; }
     .narrow .stat { padding: 0 1; }
     .narrow #controls { margin: 0 1; }
-    .narrow #scope { width: 24; }
+    .narrow #scope { width: 29; }
     .narrow #pages { margin: 0 1; }
     .narrow .list { width: 1fr; }
     .narrow .detail { width: 1fr; }
     .narrow #agent-bottom { height: 10; }
+    .narrow #agent-table { min-height: 2; }
     .narrow .split { layout: vertical; }
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail { width: 100%; height: 1fr; }
     .narrow #trace-detail { width: 100%; height: 1fr; }
     '''
     BINDINGS=[Binding('q','quit','Quit'),Binding('p','pause','Pause'),Binding('/','search','Search'),Binding('escape','back','Back',show=False),
-              Binding('t','open_trace','Open trace'),Binding('a','all','All sessions'),Binding('v','reviews','Reviews'),
+              Binding('t','open_trace','Open trace'),Binding('a','all','Reset filters'),Binding('v','reviews','Reviews'),
               Binding('b','browser','Web'),Binding('s','focus_agent','Focus agent',show=False),Binding('1','page("agents")','Agents',show=False),
               Binding('2','page("activity")','Activity',show=False),Binding('3','page("mcp")','MCP',show=False),
               Binding('4','page("traces")','Traces',show=False),Binding('5','page("host")','Host',show=False),Binding('6','page("output")','Output',show=False)]
@@ -201,7 +209,17 @@ class ObservatoryApp(App):
         self.scope_options=None
         self.scope_value='all'
         self.span_signature=None
-        self.search_timer=None
+        self.search_timers={}
+        self.search_queries={page:'' for page in ('agents','activity','mcp','traces','host')}
+
+    def results(self,page,table,placeholder,classes=''):
+        """Keep a view's filter, result count, and rows in one panel."""
+        return Vertical(
+            Horizontal(Input(placeholder=placeholder,id='search-'+page,classes='view-search'),
+                       Button('Clear',id='clear-'+page,classes='clear-search',disabled=True),classes='searchbar'),
+            Static('Loading…',id='mcp-hint' if page=='mcp' else 'search-status-'+page,classes='search-status',markup=False),
+            DataTable(id=table,cursor_type='row',zebra_stripes=True),
+            id='results-'+page,classes='box results '+classes)
 
     def compose(self)->ComposeResult:
         yield Header(show_clock=True)
@@ -209,43 +227,39 @@ class ObservatoryApp(App):
             for name in ('sessions','processes','mcp-count','usage'):
                 yield Static('',id='stat-'+name,classes='stat',markup=False)
         with Horizontal(id='controls'):
-            yield Input(placeholder='Search tasks, commands, models, MCP tools…',id='search')
+            yield Static('Scope',id='scope-label')
             yield Select([('All agent sessions','all')],value='all',allow_blank=False,id='scope')
+            yield Static('',id='controls-spacer')
             yield Checkbox('Reviews',id='reviews')
             yield Button('Pause',id='pause')
         with TabbedContent(initial='agents',id='pages'):
             with TabPane('1  Agents',id='agents'):
-                yield Static('Agent sessions, current task, model, and recent actions. Select a session to inspect its activity.',classes='hint')
-                yield DataTable(id='agent-table',classes='box',cursor_type='row',zebra_stripes=True)
+                yield self.results('agents','agent-table','Filter agents by task, project, model, or session…')
                 with Horizontal(id='agent-bottom'):
                     with Vertical(id='agent-info'):
                         yield RichLog(id='agent-detail',classes='box',wrap=True,markup=False,auto_scroll=False)
                         yield Button('Open session activity  [s]',id='agent-open')
                     yield DataTable(id='agent-actions',classes='box',cursor_type='row',zebra_stripes=True)
             with TabPane('2  Activity',id='activity'):
-                yield Static('Recorded messages, model calls, commands, file changes, browser actions, and tool results.',classes='hint')
                 with Horizontal(classes='split'):
-                    yield DataTable(id='activity-table',classes='box list',cursor_type='row',zebra_stripes=True)
+                    yield self.results('activity','activity-table','Filter activity by command, message, tool, or path…','list')
                     with Vertical(classes='detail box'):
                         yield RichLog(id='activity-detail',classes='detail-log',wrap=True,markup=False,auto_scroll=False)
                         yield Button('Open related trace  [t]',id='activity-trace',classes='detail-button')
             with TabPane('3  MCP Calls',id='mcp'):
-                yield Static('Model Context Protocol operations reported by the selected agents.',id='mcp-hint',classes='hint')
                 with Horizontal(classes='split'):
-                    yield DataTable(id='mcp-table',classes='box list',cursor_type='row',zebra_stripes=True)
+                    yield self.results('mcp','mcp-table','Filter MCP calls by server, tool, arguments, or result…','list')
                     with Vertical(classes='detail box'):
                         yield RichLog(id='mcp-detail',classes='detail-log',wrap=True,markup=False,auto_scroll=False)
                         yield Button('Open operation trace  [t]',id='mcp-trace',classes='detail-button')
             with TabPane('4  Traces',id='traces'):
-                yield Static('A trace represents one run or turn. Spans record model, tool, and framework operations; select one to inspect its attributes.',classes='hint')
                 with Horizontal(classes='split'):
-                    yield DataTable(id='trace-table',classes='box list',cursor_type='row',zebra_stripes=True)
+                    yield self.results('traces','trace-table','Filter traces by task, model, service, or ID…','list')
                     with Vertical(id='trace-detail',classes='box'):
                         yield Tree('Select a trace',id='span-tree')
                         yield RichLog(id='span-info',wrap=True,markup=False,auto_scroll=False)
             with TabPane('5  Host',id='host'):
-                yield Static('Processes observed on this host. Session counts are separate; process-to-session links appear only when the source reports them.',classes='hint')
-                yield DataTable(id='host-table',classes='box',cursor_type='row',zebra_stripes=True)
+                yield self.results('host','host-table','Filter processes by name, PID, project, or state…')
                 yield RichLog(id='host-detail',classes='box',wrap=True,markup=False,auto_scroll=False)
             if self.agent:
                 with TabPane('6  Output',id='output'):
@@ -265,7 +279,7 @@ class ObservatoryApp(App):
         for name,cols in columns.items():
             table=self.query_one('#'+name,DataTable)
             for index,(label,width) in enumerate(cols):table.add_column(label,width=width,key=str(index))
-        for name,title in [('agent-table','Agent sessions'),('agent-detail','Selected agent'),('agent-actions','Recent work'),('activity-table','Observed activity'),('mcp-table','MCP operations in current scope'),('trace-table','Traces'),('trace-detail','Spans in selected trace'),('host-table','Known agent processes'),('host-detail','Host & collection status')]:
+        for name,title in [('results-agents','Agent sessions'),('agent-detail','Selected agent'),('agent-actions','Recent work'),('results-activity','Observed activity'),('results-mcp','MCP operations'),('results-traces','Traces'),('trace-detail','Spans in selected trace'),('results-host','Known agent processes'),('host-detail','Host & collection status')]:
             self.query_one('#'+name).border_title=title
         self.query_one('#host-detail').styles.height=8
         if not self.feed.thread.is_alive():self.feed.thread.start()
@@ -298,6 +312,17 @@ class ObservatoryApp(App):
             index=next((index for index,(key,_,__) in enumerate(rows) if key==selected),0)
             table.move_cursor(row=index,scroll=False)
             table.scroll_to(x=scroll.x,y=scroll.y,animate=False)
+
+    def search_status(self,page,count,noun,plural=None):
+        query=self.search_queries[page]
+        waiting=page in {'activity','mcp','traces'} and self.data.queries.get(page,'')!=query
+        text='Filtering…' if waiting else quantity(count,('matching '+noun) if query else noun,
+                                                    ('matching '+plural) if query and plural else plural)
+        if not waiting and query and not count:text+=' · Clear to remove this filter'
+        self.query_one('#search-status-'+page,Static).update(text)
+
+    def visible_results(self,page,items):
+        return items if self.data.queries.get(page,'')==self.search_queries[page] else []
 
     def refresh_data(self):
         data=self.feed.snapshot
@@ -332,33 +357,46 @@ class ObservatoryApp(App):
             picker=self.query_one('#scope',Select);old=self.scope_value
             picker.set_options(options);picker.value=old if any(value==old for _,value in options) else 'all';self.scope_options=options
         self.source_map={item['id']:item for item in agents}
-        self.fill('agent-table',[(item['id'],[cell(item['runtime']+' · '+(item.get('session_id') or item['id'])[-6:]),cell(item.get('project') or '—'),cell(item['state'],'green' if item['recent'] else 'dim'),cell(item.get('task') or 'Task not reported'),cell(age(item['stamp']))],item) for item in agents])
-        if self.selected_source not in self.source_map:self.selected_source=agents[0]['id'] if agents else None
+        agent_query=self.search_queries['agents'].casefold()
+        visible_agents=[item for item in agents if (self.scope_value=='all' or item['id']==self.scope_value) and
+                        (not agent_query or agent_query in ' '.join(str(item.get(key) or '') for key in ('runtime','service','project','task','model','session_id','id','state')).casefold())]
+        self.fill('agent-table',[(item['id'],[cell(item['runtime']+' · '+(item.get('session_id') or item['id'])[-6:]),cell(item.get('project') or '—'),cell(item['state'],'green' if item['recent'] else 'dim'),cell(item.get('task') or 'Task not reported'),cell(age(item['stamp']))],item) for item in visible_agents])
+        self.search_status('agents',len(visible_agents),'session')
+        if self.selected_source not in {item['id'] for item in visible_agents}:self.selected_source=visible_agents[0]['id'] if visible_agents else None
         self.show_agent()
-        activity=[(item['source_id'],[cell(time.strftime('%H:%M:%S',time.localtime(item['time_unix_nano']/1e9))),cell(item['domain'].upper(),'#92b9eb'),status(item.get('result')),cell(headline(item))],item) for item in data.activity]
+        activity_items=self.visible_results('activity',data.activity_results if data.activity_results is not None else data.activity)
+        activity=[(item['source_id'],[cell(time.strftime('%H:%M:%S',time.localtime(item['time_unix_nano']/1e9))),cell(item['domain'].upper(),'#92b9eb'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
         self.fill('activity-table',activity)
+        self.search_status('activity',len(activity),'event')
         if self.selected_activity not in self.table_data.get('activity-table',{}):self.selected_activity=activity[0][0] if activity else None
         self.show_activity()
-        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano'])),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server']),cell(item['tool']),status(item['status']),cell(timing(item['duration_ms']))],item) for item in data.mcp])
-        self.query_one('#mcp-table').border_subtitle=f"{quantity(len(data.mcp),'operation')} in current scope"
-        if self.selected_mcp not in self.table_data.get('mcp-table',{}):self.selected_mcp=data.mcp[0]['id'] if data.mcp else None
+        mcp_items=self.visible_results('mcp',data.mcp_results if data.mcp_results is not None else data.mcp)
+        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano'])),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server']),cell(item['tool']),status(item['status']),cell(timing(item['duration_ms']))],item) for item in mcp_items])
+        if self.selected_mcp not in self.table_data.get('mcp-table',{}):self.selected_mcp=mcp_items[0]['id'] if mcp_items else None
         self.show_mcp()
         if not data.mcp_available:
             mcp_hint='This receiver version does not expose MCP operations. Update and restart the receiver.'
-        elif data.mcp:
-            active=sum(str(item.get('status','')).upper()=='RUNNING' for item in data.mcp)
-            mcp_hint=f"{quantity(len(data.mcp),'operation')} · {quantity(len(servers),'server')} · {quantity(len(operations),'tool')} · {quantity(mcp_errors,'error')} · {quantity(active,'in-progress call')} · {self.scope_label()}"
-        elif self.feed.query:
-            mcp_hint=f"No MCP operations match “{self.feed.query}” · {self.scope_label()}"
+        elif data.queries.get('mcp','')!=self.search_queries['mcp']:
+            mcp_hint='Filtering MCP operations…'
+        elif mcp_items:
+            server_count=len({item.get('server') for item in mcp_items})
+            error_count=sum(str(item.get('status','')).upper() in {'ERROR','FAILED'} for item in mcp_items)
+            mcp_hint=f"{quantity(len(mcp_items),'matching operation' if self.search_queries['mcp'] else 'operation')} · {quantity(server_count,'server')} · {quantity(error_count,'error')}"
+        elif self.search_queries['mcp']:
+            mcp_hint='No matching MCP operations · Clear to show all calls in this scope'
         else:
-            mcp_hint=f"No MCP operations in {self.scope_label()} · Check MCP instrumentation; general tool activity remains available in Activity."
+            mcp_hint='No MCP operations in this scope · General tool activity is available in Activity'
         self.query_one('#mcp-hint',Static).update(mcp_hint)
-        traces=data.traces[:]
+        traces=self.visible_results('traces',data.traces[:])
         detail=data.detail
         if self.feed.pinned_trace and detail.get('summary') and not any(item['trace_id']==detail['trace_id'] for item in traces):traces.insert(0,detail['summary'])
         self.fill('trace-table',[(item['trace_id'],[cell('Active · errors','yellow') if item.get('active') and item['status']=='ERROR' else cell('Error','red') if item['status']=='ERROR' else status(item['status']),cell(trace_name(item)),cell(item['span_count']),cell(number(item['input_tokens'])+' / '+number(item['output_tokens']))],item) for item in traces],preserve=self.feed.selected_trace)
+        self.search_status('traces',len(traces),'trace')
         self.show_spans()
-        self.fill('host-table',[(str(item['pid']),[cell(item['name']),cell(item['pid']),cell(item.get('project') or '—'),cell(item['state']),cell(f"{item['memory_rss_kib']/1024:.0f} MiB"),cell(f"{item['cpu_seconds']:.1f} s")],item) for item in processes])
+        host_query=self.search_queries['host'].casefold()
+        visible_processes=[item for item in processes if not host_query or host_query in ' '.join(str(item.get(key) or '') for key in ('name','pid','parent_pid','project','state')).casefold()]
+        self.fill('host-table',[(str(item['pid']),[cell(item['name']),cell(item['pid']),cell(item.get('project') or '—'),cell(item['state']),cell(f"{item['memory_rss_kib']/1024:.0f} MiB"),cell(f"{item['cpu_seconds']:.1f} s")],item) for item in visible_processes])
+        self.search_status('host',len(visible_processes),'process','processes')
         runtime=data.local_status.get('runtime') or {}
         self.inspect('host-detail','Host & collection status',[
             ('Host',runtime.get('host','Not reported')),('Platform',str(runtime.get('os',''))+' / '+str(runtime.get('architecture',''))),
@@ -406,7 +444,12 @@ class ObservatoryApp(App):
     def show_agent(self):
         item=getattr(self,'source_map',{}).get(self.selected_source)
         if not item:
-            self.inspect('agent-detail','No agent sessions found',[],[('Next step','Local Codex and Claude Code sessions are discovered automatically. Python SDK agents can use the capture launcher.')]);return
+            self.fill('agent-actions',[])
+            if self.search_queries['agents']:
+                self.inspect('agent-detail','No matching agent sessions',[],[('Search','Clear the filter in Agent sessions to show all sessions in this scope.')])
+            else:
+                self.inspect('agent-detail','No agent sessions found',[],[('Next step','Local Codex and Claude Code sessions are discovered automatically. Python SDK agents can use the capture launcher.')])
+            return
         summary=next((entry for entry in self.data.sessions if item.get('session_id') and entry.get('session_id')==item.get('session_id')),{})
         latest=item.get('last_activity') or {}
         self.inspect('agent-detail',f"{item['runtime']} · {item.get('model') or item.get('project') or 'SDK'}",[
@@ -437,7 +480,10 @@ class ObservatoryApp(App):
             if not self.data.mcp_available:
                 title='MCP inventory unavailable'
                 note='The connected receiver is too old to provide this endpoint. Update and restart the receiver.'
-            elif self.feed.query:
+            elif self.data.queries.get('mcp','')!=self.search_queries['mcp']:
+                title='Filtering MCP operations'
+                note='Waiting for matching calls from the receiver.'
+            elif self.search_queries['mcp']:
                 title='No matching MCP operations'
                 note='Clear Search or choose another agent session. Search also matches server, tool, arguments, and result.'
             else:
@@ -454,6 +500,10 @@ class ObservatoryApp(App):
 
     def show_spans(self):
         detail=self.data.detail
+        if not detail.get('trace_id'):
+            tree=self.query_one('#span-tree',Tree);tree.clear();tree.root.set_label('No trace selected')
+            self.query_one('#span-info',RichLog).clear();self.span_signature=None
+            return
         if detail.get('trace_id')!=self.feed.selected_trace:return
         spans=detail.get('spans',[])
         signature=(detail.get('trace_id'),tuple((item['span_id'],item['status'],item['end_unix_nano'],str(item['attributes'])) for item in spans))
@@ -532,15 +582,27 @@ class ObservatoryApp(App):
         self.feed.service=item.get('service') or '' if item else ''
         self.feed.selected_trace=None;self.feed.pinned_trace=False;self.feed.request_refresh()
         self.feed.selected_span_id=None
+        self.last_update=-1;self.refresh_data()
 
-    @on(Input.Changed,'#search')
+    @on(Input.Changed,'.view-search')
     def search_changed(self,event):
-        if self.search_timer:self.search_timer.stop()
-        value=event.value
+        page=event.input.id.removeprefix('search-')
+        value=event.value.strip()
+        self.query_one('#clear-'+page,Button).disabled=not event.value
+        if self.search_queries[page]==value:return
+        self.search_queries[page]=value
+        if page in self.search_timers:self.search_timers.pop(page).stop()
         def apply():
-            self.feed.query=value.strip();self.feed.selected_trace=None;self.feed.pinned_trace=False;self.feed.request_refresh()
-            self.feed.selected_span_id=None
-        self.search_timer=self.set_timer(.3,apply)
+            attr={'activity':'activity_query','mcp':'mcp_query','traces':'query'}.get(page)
+            if attr:
+                setattr(self.feed,attr,value)
+                if page=='traces':
+                    self.feed.selected_trace=None;self.feed.selected_span_id=None;self.feed.pinned_trace=False
+                self.feed.request_refresh()
+            self.last_update=-1;self.refresh_data()
+        if page in {'activity','mcp','traces'}:self.search_timers[page]=self.set_timer(.3,apply)
+        else:apply()
+        self.last_update=-1;self.refresh_data()
 
     @on(Checkbox.Changed,'#reviews')
     def reviews_changed(self,event):
@@ -550,13 +612,18 @@ class ObservatoryApp(App):
     @on(Button.Pressed)
     def button_pressed(self,event):
         if event.button.id=='pause':self.action_pause()
+        elif event.button.id.startswith('clear-'):
+            field=self.query_one('#search-'+event.button.id.removeprefix('clear-'),Input)
+            field.value='';field.focus()
         elif event.button.id=='agent-open':self.action_focus_agent()
         elif event.button.id in {'activity-trace','mcp-trace'}:self.action_open_trace()
 
     def action_pause(self):
         self.feed.paused=not self.feed.paused;self.query_one('#pause',Button).label='Resume' if self.feed.paused else 'Pause';self.feed.request_refresh();self.refresh_data()
 
-    def action_search(self):self.query_one('#search',Input).focus()
+    def action_search(self):
+        page=self.query_one('#pages',TabbedContent).active
+        if page in self.search_queries:self.query_one('#search-'+page,Input).focus()
     def action_back(self):
         self.action_page(self.query_one('#pages',TabbedContent).active)
     def action_focus_agent(self):
@@ -565,7 +632,8 @@ class ObservatoryApp(App):
             self.action_page('activity')
     def action_reviews(self):self.query_one('#reviews',Checkbox).toggle()
     def action_all(self):
-        self.query_one('#scope',Select).value='all';self.query_one('#search',Input).value=''
+        self.query_one('#scope',Select).value='all'
+        for page in self.search_queries:self.query_one('#search-'+page,Input).value=''
     def action_page(self,page):
         if page=='output' and not self.agent:return
         self.query_one('#pages',TabbedContent).active=page
