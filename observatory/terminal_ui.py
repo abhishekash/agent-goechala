@@ -210,6 +210,7 @@ class ObservatoryApp(App):
         self.scope_value='all'
         self.span_signature=None
         self.search_timers={}
+        self.refresh_timer=None
         self.search_queries={page:'' for page in ('agents','activity','mcp','traces','host')}
 
     def results(self,page,table,placeholder,classes=''):
@@ -283,8 +284,12 @@ class ObservatoryApp(App):
             self.query_one('#'+name).border_title=title
         self.query_one('#host-detail').styles.height=8
         if not self.feed.thread.is_alive():self.feed.thread.start()
-        self.set_interval(.3,self.refresh_data)
+        self.refresh_timer=self.set_interval(.3,self.refresh_data)
         self.query_one('#agent-table',DataTable).focus()
+
+    def on_unmount(self):
+        if self.refresh_timer:self.refresh_timer.stop()
+        for timer in self.search_timers.values():timer.stop()
 
     def on_resize(self):
         self.screen.set_class(self.size.width<110,'narrow')
@@ -325,6 +330,8 @@ class ObservatoryApp(App):
         return items if self.data.queries.get(page,'')==self.search_queries[page] else []
 
     def refresh_data(self):
+        # Timer messages can already be queued when child widgets unmount.
+        if not self.query('#health'):return
         data=self.feed.snapshot
         connection='PAUSED' if self.feed.paused else 'RECONNECTING' if data.error else 'CONNECTED'
         self.sub_title=connection+' · '+self.feed.api.endpoint
@@ -593,6 +600,7 @@ class ObservatoryApp(App):
         self.search_queries[page]=value
         if page in self.search_timers:self.search_timers.pop(page).stop()
         def apply():
+            if not self.query('#health'):return
             attr={'activity':'activity_query','mcp':'mcp_query','traces':'query'}.get(page)
             if attr:
                 setattr(self.feed,attr,value)

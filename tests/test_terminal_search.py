@@ -131,3 +131,5 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one('#agent-table').row_count, 2)
             await pilot.press('escape')
             self.assertEqual(app.focused.id, 'agent-table')
+        # A refresh tick queued before shutdown must tolerate removed widgets.
+        app.refresh_data()
