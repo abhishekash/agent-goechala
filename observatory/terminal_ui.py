@@ -93,6 +93,45 @@ def decode_nested(value,depth=0):
     return value
 
 
+def shell_command(value):
+    """Remove the login-shell wrapper from commands captured from a PTY."""
+    command=str(value).strip()
+    try:
+        args=shlex.split(command)
+    except ValueError:
+        return command
+    if len(args)>=3 and Path(args[0]).name in {'sh','bash','zsh','fish'} and args[1] in {'-c','-lc','-ilc'}:
+        return args[2]
+    return command
+
+
+def heredoc_script(command):
+    """Return the language and body for a captured interpreter heredoc."""
+    lines=command.splitlines()
+    if len(lines)<3:
+        return None
+    try:
+        header=shlex.split(lines[0])
+    except ValueError:
+        return None
+    interpreter=Path(header[0]).name.lower() if header else ''
+    delimiter_arg=next((part for part in header if part.startswith('<<')),None)
+    if not delimiter_arg:
+        return None
+    delimiter=delimiter_arg[2:].strip("'\"")
+    if not delimiter or lines[-1].strip()!=delimiter:
+        return None
+    if interpreter.startswith('python'):
+        language,title='python','Python script'
+    elif interpreter in {'node','nodejs','deno','bun'}:
+        language,title='javascript','JavaScript script'
+    elif interpreter in {'bash','sh','zsh','fish'}:
+        language,title='bash','Shell script'
+    else:
+        language,title='text',f'{interpreter or "Interpreter"} script'
+    return language,title,'\n'.join(lines[1:-1])
+
+
 def headline(item):
     domain=item.get('domain') or 'tool'
     subject=str(item.get('subject') or item.get('action') or 'Observed activity')
@@ -608,7 +647,16 @@ class ObservatoryApp(App):
             log.write(Syntax(json.dumps(value,ensure_ascii=False,indent=2),'json',word_wrap=True,background_color='#101720'))
             return
         log.write(Text('\n'+label.title(),style='bold #92b9eb'))
-        if label.lower() in {'command','diff','patch','unified diff','code'}:
+        if label.lower()=='command':
+            command=shell_command(value)
+            script=heredoc_script(command)
+            if script:
+                language,title,body=script
+                log.write(Text(title,style='bold #92b9eb'))
+                log.write(Syntax(body or '# Empty script',language,word_wrap=True,background_color='#101720'))
+                return
+            log.write(Syntax(command,'bash',word_wrap=True,background_color='#101720'))
+        elif label.lower() in {'diff','patch','unified diff','code'}:
             lexer='diff' if 'diff' in label.lower() or label.lower()=='patch' else 'python' if label.lower()=='code' else 'bash'
             log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#101720'))
         else:log.write(Text(str(value)))

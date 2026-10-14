@@ -1,5 +1,6 @@
 """Regression coverage for filters that used to hide unrelated MCP traffic."""
 import json
+import shlex
 import time
 import unittest
 from types import SimpleNamespace
@@ -157,6 +158,25 @@ class EvidenceRenderingTest(unittest.TestCase):
         self.assertIn('\n  "chunk_id": "2497a1",', json_block.code)
         self.assertIn('\n  "output": "main CI\\nRun actions/setup-node', json_block.code)
         self.assertNotIn(r'\"chunk_id\"', json_block.code)
+
+    def test_shell_wrapped_python_heredoc_shows_readable_source(self):
+        app = ObservatoryApp(ManualFeed())
+        source = "import json\nprint(json.dumps({'status': 'ok'}))"
+        command = "python - <<'PY'\n" + source + "\nPY"
+        captured = '/usr/bin/zsh -lc ' + shlex.quote(command)
+
+        class Capture:
+            def __init__(self):
+                self.blocks = []
+            def write(self, block):
+                self.blocks.append(block)
+
+        output = Capture()
+        app.write_evidence(output, 'Command', captured)
+        code_block = next(block for block in output.blocks if hasattr(block, 'code'))
+        self.assertEqual(code_block.code, source)
+        self.assertEqual(code_block.lexer.name, 'Python')
+        self.assertNotIn("/usr/bin/zsh", '\n'.join(getattr(block, 'plain', '') for block in output.blocks))
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
