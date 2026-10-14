@@ -40,9 +40,18 @@ def timing(value):
         return 'not reported'
 
 
+def quantity(value, singular, plural=None):
+    return f"{value} {singular if value==1 else (plural or singular+'s')}"
+
+
 def when(stamp):
     value=time.localtime(stamp/1e9)
     return time.strftime('%H:%M:%S' if value[:3]==time.localtime()[:3] else '%m-%d %H:%M',value)
+
+
+def table_when(stamp):
+    value=time.localtime(stamp/1e9)
+    return time.strftime('%H:%M:%S' if value[:3]==time.localtime()[:3] else '%m-%d',value)
 
 
 def status(value):
@@ -118,7 +127,7 @@ def sources(snapshot, include_reviews=False):
 
 
 class ObservatoryApp(App):
-    TITLE='Observatory'
+    TITLE='Agent Observatory'
     AUTO_FOCUS='#agent-table'
     CSS='''
     Screen { background: #0c1422; color: #d7e3f3; }
@@ -128,7 +137,7 @@ class ObservatoryApp(App):
     .stat { width: 1fr; background: #142238; border-left: thick #3f658f; padding: 0 2; margin-right: 1; }
     #controls { height: 3; margin: 1 2 0 2; }
     #search { width: 1fr; margin-right: 1; }
-    #scope { width: 34; margin-right: 1; }
+    #scope { width: 28; margin-right: 1; }
     #reviews { width: 14; border: none; margin-top: 1; }
     #pause { min-width: 9; width: 9; }
     #pages { height: 1fr; margin: 0 2; }
@@ -162,7 +171,7 @@ class ObservatoryApp(App):
     .narrow #summary { margin: 0 1; }
     .narrow .stat { padding: 0 1; }
     .narrow #controls { margin: 0 1; }
-    .narrow #scope { width: 26; }
+    .narrow #scope { width: 24; }
     .narrow #pages { margin: 0 1; }
     .narrow .list { width: 1fr; }
     .narrow .detail { width: 1fr; }
@@ -173,7 +182,7 @@ class ObservatoryApp(App):
     .narrow #trace-detail { width: 100%; height: 1fr; }
     '''
     BINDINGS=[Binding('q','quit','Quit'),Binding('p','pause','Pause'),Binding('/','search','Search'),Binding('escape','back','Back',show=False),
-              Binding('t','open_trace','Related trace'),Binding('a','all','All sessions'),Binding('v','reviews','Reviews'),
+              Binding('t','open_trace','Open trace'),Binding('a','all','All sessions'),Binding('v','reviews','Reviews'),
               Binding('b','browser','Web'),Binding('s','focus_agent','Focus agent',show=False),Binding('1','page("agents")','Agents',show=False),
               Binding('2','page("activity")','Activity',show=False),Binding('3','page("mcp")','MCP',show=False),
               Binding('4','page("traces")','Traces',show=False),Binding('5','page("host")','Host',show=False),Binding('6','page("output")','Output',show=False)]
@@ -206,36 +215,36 @@ class ObservatoryApp(App):
             yield Button('Pause',id='pause')
         with TabbedContent(initial='agents',id='pages'):
             with TabPane('1  Agents',id='agents'):
-                yield Static('One row = one observed agent session. Select to inspect; s focuses its activity. Reviews are optional.',classes='hint')
+                yield Static('Agent sessions, current task, model, and recent actions. Select a session to inspect its activity.',classes='hint')
                 yield DataTable(id='agent-table',classes='box',cursor_type='row',zebra_stripes=True)
                 with Horizontal(id='agent-bottom'):
                     with Vertical(id='agent-info'):
                         yield RichLog(id='agent-detail',classes='box',wrap=True,markup=False,auto_scroll=False)
-                        yield Button('View selected session activity  [s]',id='agent-open')
+                        yield Button('Open session activity  [s]',id='agent-open')
                     yield DataTable(id='agent-actions',classes='box',cursor_type='row',zebra_stripes=True)
             with TabPane('2  Activity',id='activity'):
-                yield Static('Human-readable actions in the chosen scope. Select for evidence; t opens the related trace.',classes='hint')
+                yield Static('Recorded messages, model calls, commands, file changes, browser actions, and tool results.',classes='hint')
                 with Horizontal(classes='split'):
                     yield DataTable(id='activity-table',classes='box list',cursor_type='row',zebra_stripes=True)
                     with Vertical(classes='detail box'):
                         yield RichLog(id='activity-detail',classes='detail-log',wrap=True,markup=False,auto_scroll=False)
                         yield Button('Open related trace  [t]',id='activity-trace',classes='detail-button')
-            with TabPane('3  MCP',id='mcp'):
-                yield Static('Reported MCP calls · server → tool → arguments / result → trace → execution span.',id='mcp-hint',classes='hint')
+            with TabPane('3  MCP Calls',id='mcp'):
+                yield Static('Model Context Protocol operations reported by the selected agents.',id='mcp-hint',classes='hint')
                 with Horizontal(classes='split'):
                     yield DataTable(id='mcp-table',classes='box list',cursor_type='row',zebra_stripes=True)
                     with Vertical(classes='detail box'):
                         yield RichLog(id='mcp-detail',classes='detail-log',wrap=True,markup=False,auto_scroll=False)
-                        yield Button('Open related trace  [t]',id='mcp-trace',classes='detail-button')
+                        yield Button('Open operation trace  [t]',id='mcp-trace',classes='detail-button')
             with TabPane('4  Traces',id='traces'):
-                yield Static('Trace = one linked turn/run. Span = a model call, tool execution, or run within it. Select a span for details.',classes='hint')
+                yield Static('A trace represents one run or turn. Spans record model, tool, and framework operations; select one to inspect its attributes.',classes='hint')
                 with Horizontal(classes='split'):
                     yield DataTable(id='trace-table',classes='box list',cursor_type='row',zebra_stripes=True)
                     with Vertical(id='trace-detail',classes='box'):
                         yield Tree('Select a trace',id='span-tree')
                         yield RichLog(id='span-info',wrap=True,markup=False,auto_scroll=False)
             with TabPane('5  Host',id='host'):
-                yield Static('Detected agent processes are separate from observed sessions. A session is not attributed to a PID unless reported.',classes='hint')
+                yield Static('Processes observed on this host. Session counts are separate; process-to-session links appear only when the source reports them.',classes='hint')
                 yield DataTable(id='host-table',classes='box',cursor_type='row',zebra_stripes=True)
                 yield RichLog(id='host-detail',classes='box',wrap=True,markup=False,auto_scroll=False)
             if self.agent:
@@ -250,13 +259,13 @@ class ObservatoryApp(App):
             'agent-table':[('Agent',18),('Project',18),('Activity',12),('Current / last task',56),('Updated',10)],
             'agent-actions':[('Time',8),('Type',9),('Last observed actions',48)],
             'activity-table':[('Time',8),('Type',7),('State',10),('Action',40)],
-            'mcp-table':[('When',11),('Server',15),('Tool / method',18),('State',9),('Duration',10)],
+            'mcp-table':[('Time',8),('Agent / session',14),('MCP server',12),('Operation',17),('Result',8),('Latency',9)],
             'trace-table':[('State',11),('Task / run',31),('Spans',5),('Tokens in / out',16)],
             'host-table':[('Agent',16),('PID',9),('Project',20),('State',23),('RAM',12),('CPU total',13)]}
         for name,cols in columns.items():
             table=self.query_one('#'+name,DataTable)
             for index,(label,width) in enumerate(cols):table.add_column(label,width=width,key=str(index))
-        for name,title in [('agent-table','Agent sessions'),('agent-detail','Selected agent'),('agent-actions','Recent work'),('activity-table','Observed activity'),('mcp-table','MCP calls'),('trace-table','Traces'),('trace-detail','Spans in selected trace'),('host-table','Known agent processes'),('host-detail','Host & collection status')]:
+        for name,title in [('agent-table','Agent sessions'),('agent-detail','Selected agent'),('agent-actions','Recent work'),('activity-table','Observed activity'),('mcp-table','MCP operations in current scope'),('trace-table','Traces'),('trace-detail','Spans in selected trace'),('host-table','Known agent processes'),('host-detail','Host & collection status')]:
             self.query_one('#'+name).border_title=title
         self.query_one('#host-detail').styles.height=8
         if not self.feed.thread.is_alive():self.feed.thread.start()
@@ -292,7 +301,8 @@ class ObservatoryApp(App):
 
     def refresh_data(self):
         data=self.feed.snapshot
-        self.sub_title=('PAUSED' if self.feed.paused else 'LIVE')+' · '+self.feed.api.endpoint
+        connection='PAUSED' if self.feed.paused else 'RECONNECTING' if data.error else 'CONNECTED'
+        self.sub_title=connection+' · '+self.feed.api.endpoint
         self.query_one('#health',Static).update(Text(data.error or (
             f"Updated {age(int(data.updated*1e9))} · Scope: {self.scope_label()} · Local session records + received telemetry · Reviews {'shown' if self.feed.include_reviews else 'hidden'}"),style='red' if data.error else '#91a7c3'))
         if data.updated==self.last_update:return
@@ -310,10 +320,13 @@ class ObservatoryApp(App):
         reviews=sum(entry.get('service')=='codex-review' for entry in data.local_status.get('sessions',[]))
         processes=(data.local_status.get('runtime') or {}).get('processes',[])
         live=sum(not str(item.get('state','')).startswith(('Z','X')) for item in processes)
-        self.stat('sessions',len(work),'agent sessions',f'{recent} recent · {len(work)-recent} idle / offline · {reviews} reviews')
-        self.stat('processes',live,'live processes','Detected on local host; separate from sessions')
-        self.stat('mcp-count',len(data.mcp),'MCP calls loaded','Latest reported calls in current scope')
-        self.stat('usage',number(data.totals.get('input_tokens'))+' / '+number(data.totals.get('output_tokens')),'tokens','Stored input / output; includes cached context')
+        self.stat('sessions',len(work),'agent '+('session' if len(work)==1 else 'sessions'),f'{recent} recent · {len(work)-recent} idle / offline · {reviews} reviews')
+        self.stat('processes',live,'live processes','Observed on this host; separate from sessions')
+        servers={item.get('server') for item in data.mcp if item.get('server') and item.get('server')!='Not reported'}
+        operations={(item.get('server'),item.get('tool')) for item in data.mcp if item.get('tool') and item.get('tool')!='Not reported'}
+        mcp_errors=sum(str(item.get('status','')).upper() in {'ERROR','FAILED'} for item in data.mcp)
+        self.stat('mcp-count',quantity(len(data.mcp),'MCP operation'),'observed',f'{quantity(len(servers),"server")} · {quantity(len(operations),"tool")} · {quantity(mcp_errors,"error")} in scope')
+        self.stat('usage',number(data.totals.get('input_tokens'))+' / '+number(data.totals.get('output_tokens')),'input / output tokens','Stored usage; input may include cached context')
         options=[('All agent sessions','all')]+[(f"{item['runtime']} · {item.get('project') or 'SDK'} · {(item.get('session_id') or item['id'])[-6:]}",item['id']) for item in agents]
         if options!=self.scope_options:
             picker=self.query_one('#scope',Select);old=self.scope_value
@@ -326,14 +339,24 @@ class ObservatoryApp(App):
         self.fill('activity-table',activity)
         if self.selected_activity not in self.table_data.get('activity-table',{}):self.selected_activity=activity[0][0] if activity else None
         self.show_activity()
-        self.fill('mcp-table',[(item['id'],[cell(when(item['time_unix_nano'])),cell(item['server']),cell(item['tool']),status(item['status']),cell(timing(item['duration_ms']))],item) for item in data.mcp])
+        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano'])),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server']),cell(item['tool']),status(item['status']),cell(timing(item['duration_ms']))],item) for item in data.mcp])
+        self.query_one('#mcp-table').border_subtitle=f"{quantity(len(data.mcp),'operation')} in current scope"
         if self.selected_mcp not in self.table_data.get('mcp-table',{}):self.selected_mcp=data.mcp[0]['id'] if data.mcp else None
         self.show_mcp()
-        self.query_one('#mcp-hint',Static).update('Reported MCP calls · server → tool → evidence → trace / span.' if data.mcp_available else 'This receiver needs an update to expose the MCP inventory. Restart the updated receiver.')
+        if not data.mcp_available:
+            mcp_hint='This receiver version does not expose MCP operations. Update and restart the receiver.'
+        elif data.mcp:
+            active=sum(str(item.get('status','')).upper()=='RUNNING' for item in data.mcp)
+            mcp_hint=f"{quantity(len(data.mcp),'operation')} · {quantity(len(servers),'server')} · {quantity(len(operations),'tool')} · {quantity(mcp_errors,'error')} · {quantity(active,'in-progress call')} · {self.scope_label()}"
+        elif self.feed.query:
+            mcp_hint=f"No MCP operations match “{self.feed.query}” · {self.scope_label()}"
+        else:
+            mcp_hint=f"No MCP operations in {self.scope_label()} · Check MCP instrumentation; general tool activity remains available in Activity."
+        self.query_one('#mcp-hint',Static).update(mcp_hint)
         traces=data.traces[:]
         detail=data.detail
         if self.feed.pinned_trace and detail.get('summary') and not any(item['trace_id']==detail['trace_id'] for item in traces):traces.insert(0,detail['summary'])
-        self.fill('trace-table',[(item['trace_id'],[cell('Working !','yellow') if item.get('active') and item['status']=='ERROR' else cell('Has errors','red') if item['status']=='ERROR' else status(item['status']),cell(trace_name(item)),cell(item['span_count']),cell(number(item['input_tokens'])+' / '+number(item['output_tokens']))],item) for item in traces],preserve=self.feed.selected_trace)
+        self.fill('trace-table',[(item['trace_id'],[cell('Active · errors','yellow') if item.get('active') and item['status']=='ERROR' else cell('Error','red') if item['status']=='ERROR' else status(item['status']),cell(trace_name(item)),cell(item['span_count']),cell(number(item['input_tokens'])+' / '+number(item['output_tokens']))],item) for item in traces],preserve=self.feed.selected_trace)
         self.show_spans()
         self.fill('host-table',[(str(item['pid']),[cell(item['name']),cell(item['pid']),cell(item.get('project') or '—'),cell(item['state']),cell(f"{item['memory_rss_kib']/1024:.0f} MiB"),cell(f"{item['cpu_seconds']:.1f} s")],item) for item in processes])
         runtime=data.local_status.get('runtime') or {}
@@ -383,7 +406,7 @@ class ObservatoryApp(App):
     def show_agent(self):
         item=getattr(self,'source_map',{}).get(self.selected_source)
         if not item:
-            self.inspect('agent-detail','Waiting for agents',[],[('Connect','Local Codex and Claude Code sessions are discovered automatically. Python SDK agents can use the capture launcher.')]);return
+            self.inspect('agent-detail','No agent sessions found',[],[('Next step','Local Codex and Claude Code sessions are discovered automatically. Python SDK agents can use the capture launcher.')]);return
         summary=next((entry for entry in self.data.sessions if item.get('session_id') and entry.get('session_id')==item.get('session_id')),{})
         latest=item.get('last_activity') or {}
         self.inspect('agent-detail',f"{item['runtime']} · {item.get('model') or item.get('project') or 'SDK'}",[
@@ -401,7 +424,7 @@ class ObservatoryApp(App):
     def show_activity(self):
         item=self.table_data.get('activity-table',{}).get(self.selected_activity)
         if not item:
-            self.inspect('activity-detail','Waiting for observed activity',[],[('Scope','No recent actions in this scope. Choose another session or clear the search.')]);return
+            self.inspect('activity-detail','No activity in this scope',[],[('Scope','Choose another agent session or clear the search to view recent activity.')]);return
         details=decode(item.get('detail') or '')
         sections=list(details.items()) if isinstance(details,dict) else [('Recorded content',details)]
         self.inspect('activity-detail',headline(item),[('Agent',item.get('service')),('Type',item.get('domain')),('Result',str(status(item.get('result')))),
@@ -411,10 +434,23 @@ class ObservatoryApp(App):
     def show_mcp(self):
         item=self.table_data.get('mcp-table',{}).get(self.selected_mcp)
         if not item:
-            self.inspect('mcp-detail','No MCP calls reported in this scope',[],[('What appears here','Only telemetry identified as MCP. Other tool calls remain in Activity.')]);return
-        self.inspect('mcp-detail',item['server']+' / '+item['tool'],[('Method',item['method']),('Agent',item['service']),
-            ('Result',str(status(item['status']))),('Duration',timing(item['duration_ms'])),('Trace',item.get('trace_id')),
-            ('Span',item.get('span_id') or 'Not linked'),('Source',item['source'])],[('Arguments',item.get('arguments')),('Result / output',item.get('output'))])
+            if not self.data.mcp_available:
+                title='MCP inventory unavailable'
+                note='The connected receiver is too old to provide this endpoint. Update and restart the receiver.'
+            elif self.feed.query:
+                title='No matching MCP operations'
+                note='Clear Search or choose another agent session. Search also matches server, tool, arguments, and result.'
+            else:
+                title='No MCP operations in this scope'
+                note='Calls identified as Model Context Protocol appear here. Other tool activity remains in Activity.'
+            self.inspect('mcp-detail',title,[('Scope',self.scope_label())],[('How to proceed',note)])
+            return
+        self.inspect('mcp-detail',item['server']+' / '+item['tool'],[
+            ('Agent',item.get('service') or 'Not reported'),('Session',item.get('session_id') or 'Not reported'),
+            ('Method',item.get('method') or 'Not reported'),('Result',str(status(item.get('status')))),
+            ('Latency',timing(item.get('duration_ms'))),('Observed',when(item.get('time_unix_nano') or 0)),
+            ('Trace ID',item.get('trace_id') or 'Not linked'),('Span ID',item.get('span_id') or 'Not linked'),
+            ('Evidence',item.get('source') or 'Not reported')],[('Arguments',item.get('arguments')),('Result',item.get('output'))])
 
     def show_spans(self):
         detail=self.data.detail
