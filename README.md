@@ -2,11 +2,13 @@
 
 [![CI](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/agent-observatory-cli)](https://pypi.org/project/agent-observatory-cli/)
+[![Downloads](https://img.shields.io/pypi/dm/agent-observatory-cli?label=downloads%2Fmonth)](https://pypistats.org/packages/agent-observatory-cli)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![OpenTelemetry OTLP](https://img.shields.io/badge/OpenTelemetry-OTLP-425CC7?logo=opentelemetry&logoColor=white)
 ![Local first](https://img.shields.io/badge/data-local--first-2E8B57)
 
-**See what your agents are doing, live.** Agent Observatory watches local Codex and Claude Code sessions, receives OpenTelemetry from instrumented agents, and brings tasks, tool calls, MCP, traces, tokens, errors, and host activity into one terminal cockpit and local web dashboard.
+**See what your agents are doing, live.** Agent Observatory watches local Codex and Claude Code sessions, receives OpenTelemetry from instrumented agents, and brings tasks, model calls, MCP tools, traces, tokens, errors, and host activity into one terminal cockpit and local web dashboard.
 
 <p align="center">
   <img src="media/terminal-demo.gif" alt="Animated preview of the Agent Observatory terminal cockpit with agents, MCP calls, traces, and host processes" width="960">
@@ -60,6 +62,10 @@ Send OpenTelemetry traces, logs, and metrics over OTLP/HTTP, or use the Python a
 - [Node.js client](docs/javascript.md)
 - [OTLP, receiver, and deployment configuration](docs/receiver.md)
 - [Complete usage guide and examples](docs/usage.md)
+
+For MCP clients that need to query saved traces conversationally, pair the
+cockpit with [SpanHound](https://github.com/abhishekash/spanhound), a local MCP
+server for trace failures, approvals, token usage, and run comparisons.
 
 ## Develop
 
