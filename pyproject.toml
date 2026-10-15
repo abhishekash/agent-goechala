@@ -1,19 +1,22 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-observatory"
+name = "agent-observatory-cli"
 version = "0.1.0"
 description = "Local agent trace receiver and investigation dashboard"
 requires-python = ">=3.11"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

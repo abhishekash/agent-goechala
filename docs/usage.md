@@ -4,14 +4,14 @@ A local, framework-independent receiver and investigation dashboard for AI agent
 
 ## Install and launch the terminal cockpit
 
-Python 3.11+ is required. Install the CLI in an isolated environment with [uv tools](https://docs.astral.sh/uv/guides/tools/). From the workspace folder containing `agent-observatory`:
+Python 3.11+ is required. Install the CLI in an isolated environment with [uv tools](https://docs.astral.sh/uv/guides/tools/):
 
 ```bash
-uv tool install ./agent-observatory
+uv tool install agent-observatory-cli
 agent-observatory
 ```
 
-If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. This package is currently distributed from this checkout or the dashboard download; these commands do not assume a public package registry release. A downloaded archive works too: `uv tool install ./agent-observatory-0.1.0.tar.gz`.
+If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install agent-observatory-cli`.
 
 The cockpit opens a tabbed interface for Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. The Agents view shows individual sessions, tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Only this localhost listener is needed. Run `agent-observatory` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
 
@@ -47,14 +47,14 @@ Local discovery runs in the receiver. If you installed an earlier version, reins
 
 ### Launch a Python SDK agent with the panels
 
-Automatic capture must run in the agent's own Python environment. From your agent project, install it once, using the path to this checkout:
+Automatic capture must run in the agent's own Python environment. From your agent project, install the extra into that environment:
 
 ```bash
-uv pip install --python .venv/bin/python '/path/to/agent-observatory[auto]'
+uv pip install --python .venv/bin/python 'agent-observatory-cli[auto]'
 agent-observatory cockpit --python .venv/bin/python --service my-agent agent.py
 ```
 
-Replace the checkout path and agent filename with your own. The agent's existing dependencies remain in its environment. Arguments after `agent.py` go to the script; `--module` runs a Python module. If Observatory is already installed in the active agent environment, use `python -m observatory cockpit --service my-agent agent.py`.
+Replace the virtual environment path, service name, and agent filename with your own. The agent's existing dependencies remain in its environment. Arguments after `agent.py` go to the script; `--module` runs a Python module. If Observatory is already installed in the active agent environment, use `python -m observatory cockpit --service my-agent agent.py`.
 
 Other already running processes need to export OTLP telemetry to this receiver or be restarted through the capture launcher. The output panel captures stdout/stderr; use this launcher for agents that do not require interactive stdin. Python SDK prompts and responses are omitted unless you add `--capture-content`. Native session capture has its own `--metadata-only` receiver setting.
 
@@ -225,7 +225,7 @@ Nested spans follow asynchronous execution context, including spans started insi
 For automatic callback capture in LangChain and LangGraph, install the optional adapter:
 
 ```bash
-pip install 'agent-observatory[langchain]'
+pip install 'agent-observatory-cli[langchain]'
 ```
 
 Attach the handler inside an Observatory run and pass it through the runnable config. It records nested chain, model, tool, and retriever spans; captures standardized token usage when the model supplies it; records errors; and maps LangChain custom callbacks named `progress`, `agent.progress`, or `langgraph.progress` into the run timeline. LangGraph applications that use custom stream output can call `run.aprogress(...)` as they consume those events. Prompts, tool inputs, and outputs stay out of telemetry unless `capture_content=True` is set.
@@ -244,7 +244,7 @@ with telemetry.trace(task="Research a question", session_id="thread-42") as run:
 For the OpenAI Agents SDK, install its optional exporter and add the batching processor to the SDK tracing provider:
 
 ```bash
-pip install 'agent-observatory[openai-agents]'
+pip install 'agent-observatory-cli[openai-agents]'
 ```
 
 ```python

@@ -9,7 +9,7 @@ try:
 except ImportError as exc:  # pragma: no cover - depends on optional integration extra
     raise ImportError(
         "LangChainCallbackHandler requires the optional dependency: "
-        "pip install 'agent-observatory[langchain]'"
+        "pip install 'agent-observatory-cli[langchain]'"
     ) from exc
 
 

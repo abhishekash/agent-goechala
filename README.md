@@ -1,6 +1,7 @@
 # Agent Observatory
 
 [![CI](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-observatory-cli)](https://pypi.org/project/agent-observatory-cli/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![OpenTelemetry OTLP](https://img.shields.io/badge/OpenTelemetry-OTLP-425CC7?logo=opentelemetry&logoColor=white)
 ![Local first](https://img.shields.io/badge/data-local--first-2E8B57)
@@ -18,11 +19,11 @@
 Requires Python 3.11+. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if needed, then:
 
 ```bash
-uv tool install 'git+https://github.com/abhishekash/agent-observatory'
+uv tool install agent-observatory-cli
 agent-observatory
 ```
 
-This repository is private, so GitHub authentication and repository access are required for the Git install.
+Or install it into the active Python environment with `python -m pip install agent-observatory-cli`.
 
 The terminal cockpit discovers recent local Codex and Claude Code sessions automatically. Press **b** to open the local web dashboard. It listens on `127.0.0.1:14318`.
 
@@ -70,3 +71,9 @@ python -m unittest discover -s tests -v
 ```
 
 Contributions and bug reports are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and [open an issue](https://github.com/abhishekash/agent-observatory/issues).
+
+Maintainers can follow the [PyPI publishing guide](docs/publishing.md) to release a version with Trusted Publishing.
+
+## License
+
+Agent Observatory is distributed under the [MIT License](LICENSE).

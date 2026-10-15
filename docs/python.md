@@ -2,10 +2,10 @@
 
 ## Install the CLI
 
-Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/) are required. Install from the repository:
+Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/) are required. Install the published CLI:
 
 ```bash
-uv tool install 'git+https://github.com/abhishekash/agent-observatory'
+uv tool install agent-observatory-cli
 agent-observatory
 ```
 
@@ -20,7 +20,7 @@ Start `agent-observatory`. Recent local sessions are discovered automatically on
 Install the automatic capture extra into the same environment as your agent:
 
 ```bash
-uv pip install --python .venv/bin/python 'agent-observatory[auto]'
+uv pip install --python .venv/bin/python 'agent-observatory-cli[auto]'
 ```
 
 Run your script through the cockpit:
@@ -44,4 +44,4 @@ with telemetry.trace(task="Research a question", session_id="thread-42") as run:
         result = search_web()
 ```
 
-See the complete [API and integration examples](usage.md). The optional integrations are installed with `agent-observatory[langchain]` and `agent-observatory[openai-agents]`.
+See the complete [API and integration examples](usage.md). The optional integrations are installed with `agent-observatory-cli[langchain]` and `agent-observatory-cli[openai-agents]`.

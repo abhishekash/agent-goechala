@@ -14,12 +14,14 @@ def _manifest(package):
     if source.is_file():
         content = source.read_text(encoding="utf-8")
         return tomllib.loads(content)["project"]["version"], content
-    info = metadata.metadata("agent-observatory")
+    info = metadata.metadata("agent-observatory-cli")
     version = info["Version"]
     extras = info.get_all("Provides-Extra") or []
-    content = ('[build-system]\nrequires = ["setuptools>=68"]\nbuild-backend = "setuptools.build_meta"\n'
-        '[project]\nname = "agent-observatory"\nversion = ' + json.dumps(version) + '\n'
+    content = ('[build-system]\nrequires = ["setuptools>=77"]\nbuild-backend = "setuptools.build_meta"\n'
+        '[project]\nname = "agent-observatory-cli"\nversion = ' + json.dumps(version) + '\n'
         'requires-python = ' + json.dumps(info.get("Requires-Python", ">=3.11")) + '\n'
+        'license = ' + json.dumps(info.get("License-Expression", "MIT")) + '\n'
+        'license-files = ["LICENSE"]\n'
         'dependencies = ' + json.dumps(info.get_all("Requires-Dist") or []) + '\n'
         '[project.optional-dependencies]\n' + ''.join(json.dumps(extra) + ' = []\n' for extra in extras) +
         '[project.scripts]\nagent-observatory = "observatory.__main__:main"\n'
@@ -48,6 +50,16 @@ def package_archive():
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(data))
         add("pyproject.toml", manifest.encode("utf-8"))
+        license_file = package.parent / "LICENSE"
+        if not license_file.is_file():
+            try:
+                installed_license = metadata.distribution("agent-observatory-cli").read_text("licenses/LICENSE")
+            except (metadata.PackageNotFoundError, OSError):
+                installed_license = None
+            if installed_license:
+                add("LICENSE", installed_license.encode("utf-8"))
+        else:
+            add("LICENSE", license_file.read_bytes())
         for path in sorted(package.rglob("*")):
             if (path.is_file() and path.suffix in {".py", ".html", ".css", ".js"}
                     and path.resolve().is_relative_to(package)):
