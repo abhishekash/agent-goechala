@@ -1,0 +1,26 @@
+name: First-run feedback
+description: Tell us what you tried and what would make the tool more useful.
+title: "First run: "
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks for trying Agent Observatory. Share redacted excerpts; session logs can contain prompts and credentials."
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to see?
+      placeholder: "Agent/client, model, and the task or tool call you wanted to investigate."
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: What happened?
+      description: "What worked, what was missing, and any steps that reproduce a problem."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "OS, terminal, Python version, Observatory version, and install command."

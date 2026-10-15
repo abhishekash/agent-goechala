@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-observatory-cli"
-version = "0.1.0"
-description = "Local agent trace receiver and investigation dashboard"
+version = "0.1.1"
+description = "Local terminal and web dashboard for AI agent sessions, MCP calls, OpenTelemetry traces, and errors."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing"]
+keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing", "mcp", "codex", "claude-code"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -25,8 +25,14 @@ classifiers = [
     "Topic :: Software Development :: Debuggers",
     "Topic :: System :: Monitoring",
 ]
-urls = {"Repository" = "https://github.com/abhishekash/agent-observatory", "Issues" = "https://github.com/abhishekash/agent-observatory/issues"}
 dependencies = ["textual>=8.2,<9"]
+
+[project.urls]
+Homepage = "https://github.com/abhishekash/agent-observatory"
+Documentation = "https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md"
+Repository = "https://github.com/abhishekash/agent-observatory"
+Issues = "https://github.com/abhishekash/agent-observatory/issues"
+Changelog = "https://github.com/abhishekash/agent-observatory/releases"
 
 [project.optional-dependencies]
 auto = [
