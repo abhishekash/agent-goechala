@@ -11,6 +11,7 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlencode
 
 from rich.cells import cell_len, get_character_cell_size
 from rich.segment import Segment
@@ -321,8 +322,12 @@ def sources(snapshot, include_reviews=False):
         last=entry.get('last_activity') or {}
         stamp=last.get('time_unix_nano') or 0
         recent=bool(last and time.time()-stamp/1e9<35)
+        reported=entry.get('run_state','unknown')
+        state={'completed':'Completed','interrupted':'Interrupted','waiting':'Waiting','running':'Working'}.get(reported,'Active' if recent else 'Unknown')
+        if reported in {'running','waiting'} and not recent:
+            state='No updates'
         result.append({**entry,'id':entry['source_id'],'review':review,'recent':recent,'stamp':stamp,
-                       'state':'Recent' if recent else 'Idle','spans':connection.get('span_count',0)})
+                       'state':state,'spans':connection.get('span_count',0)})
     for entry in connections.values():
         if 'local-session-log' in entry.get('integrations',[]):
             continue
@@ -498,11 +503,13 @@ class ObservatoryApp(App):
     DataTable > .datatable--even-row { background: #101720; }
     RichLog { background: #101720; color: #dce4ed; scrollbar-size: 1 1; }
     RichLog:focus { background-tint: transparent; }
+    #mcp-servers { height: 7; margin-bottom: 1; }
+    .expanded #mcp-servers { display: none; }
     #agent-table { height: 1fr; min-height: 3; }
     #agent-bottom { height: 14; margin-top: 1; }
     #agent-info { width: 1fr; margin-right: 1; }
     #agent-detail { width: 100%; height: 1fr; }
-    #agent-open { height: 3; width: 100%; }
+    #agent-open { height: 3; width: 1fr; }
     #agent-actions { width: 1fr; }
     .split { height: 1fr; }
     .list { width: 3fr; margin-right: 1; }
@@ -574,6 +581,8 @@ class ObservatoryApp(App):
         self.search_queries={page:'' for page in ('agents','activity','mcp','traces','host')}
         self.errors_only=set()
         self.navigation_history=[]
+        self.ai_summaries={}
+        self.summary_busy=False
 
     def results(self,page,table,placeholder,classes=''):
         """Keep a view's filter, result count, and rows in one panel."""
@@ -614,7 +623,9 @@ class ObservatoryApp(App):
                 with Horizontal(id='agent-bottom'):
                     with Vertical(id='agent-info'):
                         yield SelectableRichLog(id='agent-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
-                        yield Button(Text('Session activity  ·  s'),id='agent-open')
+                        with Horizontal(classes='inspector-actions'):
+                            yield Button(Text('Session activity · s'),id='agent-open')
+                            yield Button('AI summary',id='agent-summary',tooltip='Send this session’s task and up to 30 recent action headlines to your configured provider. Uses your API quota.')
                     yield ResultsTable(id='agent-actions',classes='box',cursor_type='row',zebra_stripes=True)
             with TabPane('2  Activity',id='activity'):
                 with Horizontal(classes='split'):
@@ -626,6 +637,7 @@ class ObservatoryApp(App):
                             yield Button(Text('Copy event · c'),id='activity-copy')
                             yield Button(Text('Expand · e'),id='expand-activity',classes='expand-button')
             with TabPane('3  MCP Calls',id='mcp'):
+                yield ResultsTable(id='mcp-servers',classes='box',cursor_type='row',zebra_stripes=True)
                 with Horizontal(classes='split'):
                     yield self.results('mcp','mcp-table','Filter MCP calls by server, tool, arguments, or result…','list')
                     with Vertical(id='mcp-inspector',classes='detail box'):
@@ -655,15 +667,16 @@ class ObservatoryApp(App):
 
     def on_mount(self):
         columns={
-            'agent-table':[('Agent',15,1),('Project',10,1),('Status',8,0),('Current / last task',20,5),('Seen',7,0)],
+            'agent-table':[('Agent',11,0),('Session ID',12,1),('Repo / project',14,2),('Status',12,0),('Updated',8,0),('Waiting on',16,2),('Task / details',22,4)],
             'agent-actions':[('Time',8,0),('Type',7,0),('Recent actions',15,1)],
             'activity-table':[('Time',8,0),('Type',7,0),('Result',9,0),('Action',20,1)],
+            'mcp-servers':[('Observed server · Enter filters calls',30,3),('Calls',8,0),('Tools',8,0),('Errors',8,0)],
             'mcp-table':[('Time',8,0),('Agent',11,1),('Server',9,1),('Tool',14,3),('Result',7,0),('Latency',7,0)],
             'trace-table':[('Result',11,0),('Task / run',20,1),('Spans',5,0),('Tokens in / out',15,0)],
             'host-table':[('Process',10,1),('PID',7,0),('Project',12,2),('State',8,1),('RAM',9,0),('CPU total',9,0)]}
         for name,cols in columns.items():
             self.query_one('#'+name,ResultsTable).configure(cols)
-        for name,title in [('results-agents','Agent sessions'),('agent-detail','Session overview'),('agent-actions','Recent work'),('results-activity','Activity stream'),('activity-inspector','Event detail'),('results-mcp','MCP calls'),('mcp-inspector','Call detail'),('results-traces','Traces'),('trace-detail','Execution tree'),('results-host','Agent processes'),('host-detail','Collection status')]:
+        for name,title in [('results-agents','Agent sessions'),('agent-detail','Session overview'),('agent-actions','Recent work'),('results-activity','Activity stream'),('activity-inspector','Event detail'),('mcp-servers','Servers observed in this scope · all stored history'),('results-mcp','MCP calls'),('mcp-inspector','Call detail'),('results-traces','Traces'),('trace-detail','Execution tree'),('results-host','Agent processes'),('host-detail','Collection status')]:
             self.query_one('#'+name).border_title=title
         for page in self.search_queries:
             self.query_one('#results-'+page).border_subtitle='↑↓ select  ·  Enter inspect'
@@ -782,13 +795,19 @@ class ObservatoryApp(App):
         reviews=sum(entry.get('service')=='codex-review' for entry in data.local_status.get('sessions',[]))
         processes=(data.local_status.get('runtime') or {}).get('processes',[])
         live=sum(not str(item.get('state','')).startswith(('Z','X')) for item in processes)
-        self.stat('sessions',len(work),'Agent sessions',f'{recent} recent · {len(work)-recent} idle / offline')
+        self.stat('sessions',len(work),'Agent sessions',f'{recent} updated recently · {sum(item["state"]=="Waiting" for item in work)} waiting')
         self.stat('processes',live,'Host processes','PIDs on this host')
         servers={item.get('server') for item in data.mcp if item.get('server') and item.get('server')!='Not reported'}
         operations={(item.get('server'),item.get('tool')) for item in data.mcp if item.get('tool') and item.get('tool')!='Not reported'}
         mcp_errors=sum(str(item.get('status','')).upper() in {'ERROR','FAILED'} for item in data.mcp)
-        self.stat('mcp-count',quantity(len(data.mcp),'call')+('' if self.size.width<110 else ' · '+quantity(len(servers),'server')),'MCP in scope',
-                  f'{quantity(len(servers),"server")} · {quantity(mcp_errors,"error")}' if self.size.width<110 else f'{quantity(len(operations),"tool")} · {quantity(mcp_errors,"error")}')
+        inventory=data.mcp_summary
+        call_count=inventory.get('calls',len(data.mcp))
+        server_count=len(inventory['servers']) if inventory else len(servers)
+        tool_count=inventory.get('tools',len(operations))
+        mcp_errors=inventory.get('errors',mcp_errors)
+        self.stat('mcp-count',quantity(call_count,'call')+('' if self.size.width<110 else ' · '+quantity(server_count,'server')),'Observed MCP',
+                  f'{quantity(server_count,"server")} · {quantity(mcp_errors,"error")}' if self.size.width<110 else f'{quantity(tool_count,"tool")} · {quantity(mcp_errors,"error")}')
+        self.query_one('#stat-mcp-count').tooltip='All stored calls in the selected scope. Configured servers appear only after an observed call.\n'+', '.join(row['server'] for row in inventory.get('servers',[]))
         self.stat('usage',number(data.totals.get('input_tokens'))+' / '+number(data.totals.get('output_tokens')),'Tokens in / out','Includes cached input')
         self.query_one('#stat-sessions').tooltip=f'{reviews} approval reviews · Recent means a session record changed within 35 seconds'
         self.query_one('#stat-usage').tooltip='Recorded token totals; repeated and cached input is included. This is not a billable cost estimate.'
@@ -799,8 +818,13 @@ class ObservatoryApp(App):
         self.source_map={item['id']:item for item in agents}
         agent_query=self.search_queries['agents'].casefold()
         visible_agents=[item for item in agents if (self.scope_value=='all' or item['id']==self.scope_value) and
-                        (not agent_query or agent_query in ' '.join(str(item.get(key) or '') for key in ('runtime','service','project','task','model','session_id','id','state')).casefold())]
-        self.fill('agent-table',[(item['id'],[cell(item['runtime']+' · '+(item.get('session_id') or item['id'])[-6:]),cell(item.get('project') or '—','#a4b7cb'),cell(('● ' if item['recent'] else '○ ')+item['state'],'#6ee7c2' if item['recent'] else '#8b9bb0'),cell(item.get('task') or 'Task not reported'),cell(age(item['stamp']),'#8b9bb0')],item) for item in visible_agents])
+                        (not agent_query or agent_query in ' '.join(str(item.get(key) or '') for key in ('runtime','service','project','working_directory','branch','task','model','session_id','id','state','waiting_for')).casefold())]
+        self.fill('agent-table',[(item['id'],[
+            cell(item['runtime']),cell(item.get('session_id') or item['id'],'#a4b7cb'),
+            cell(item.get('project') or '—'),
+            cell(item['state'],'#fbbf24' if item['state']=='Waiting' else '#6ee7c2' if item['recent'] else '#8b9bb0'),
+            cell(age(item['stamp']),'#8b9bb0'),cell(item.get('waiting_for') or '—'),
+            cell(item.get('task') or 'Task not reported')],item) for item in visible_agents])
         self.search_status('agents',len(visible_agents),'session')
         if self.selected_source not in {item['id'] for item in visible_agents}:self.selected_source=visible_agents[0]['id'] if visible_agents else None
         self.show_agent()
@@ -811,6 +835,7 @@ class ObservatoryApp(App):
         self.search_status('activity',len(activity),'event')
         if self.selected_activity not in self.table_data.get('activity-table',{}):self.selected_activity=activity[0][0] if activity else None
         self.show_activity()
+        self.fill('mcp-servers',[(row['server'],[cell(row['server']),cell(number(row['calls'])),cell(number(row['tools'])),cell(number(row['errors']))],row) for row in data.mcp_summary.get('servers',[])])
         mcp_items=self.visible_results('mcp',data.mcp_results if data.mcp_results is not None else data.mcp)
         mcp_items=self.hold_selected('mcp',mcp_items,self.selected_mcp,'id')
         self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano']),'#8b9bb0'),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server'],'#a4b7cb'),cell(item['tool']),status(item['status']),cell('—' if item['duration_ms'] is None else timing(item['duration_ms']))],item) for item in mcp_items])
@@ -821,7 +846,7 @@ class ObservatoryApp(App):
         elif data.queries.get('mcp','')!=self.search_queries['mcp']:
             mcp_hint='Filtering MCP operations…'
         elif mcp_items:
-            server_count=len({item.get('server') for item in mcp_items})
+            server_count=len({item.get('server') for item in mcp_items if item.get('server') and item['server']!='Not reported'})
             error_count=sum(str(item.get('status','')).upper() in {'ERROR','FAILED'} for item in mcp_items)
             mcp_hint=f"{quantity(len(mcp_items),'matching operation' if self.search_queries['mcp'] else 'operation')} · {quantity(server_count,'server')} · {quantity(error_count,'error')}"
         elif self.search_queries['mcp']:
@@ -948,6 +973,7 @@ class ObservatoryApp(App):
 
     def show_agent(self):
         item=getattr(self,'source_map',{}).get(self.selected_source)
+        self.query_one('#agent-summary',Button).disabled=not bool(item) or self.summary_busy
         if not item:
             self.query_one('#agent-open',Button).disabled=True
             self.fill('agent-actions',[])
@@ -959,13 +985,23 @@ class ObservatoryApp(App):
         self.query_one('#agent-open',Button).disabled=False
         summary=next((entry for entry in self.data.sessions if item.get('session_id') and entry.get('session_id')==item.get('session_id')),{})
         latest=item.get('last_activity') or {}
+        generated=self.ai_summaries.get(item['id'])
+        ai_sections=[]
+        if generated:
+            stamp,text=generated
+            label='AI summary · earlier snapshot' if stamp!=item.get('stamp') else 'AI summary · verify against recorded events'
+            ai_sections=[(label,text)]
         self.inspect('agent-detail',clean(item.get('task') or 'Task not reported'),[
-            ('Agent',f"{item['runtime']} · {item.get('project') or 'SDK'}"),
+            ('Agent',item['runtime']),('Session ID',item.get('session_id') or item['id']),
+            ('Repo / project',item.get('project') or 'Not reported'),('Branch',item.get('branch') or 'Not reported'),
+            ('Status',item['state']),('Waiting on',item.get('waiting_for') or 'No wait reported'),
+            ('Last updated',when(item['stamp'])+' · '+age(item['stamp']) if item['stamp'] else 'Not reported'),
             ('Latest',headline(latest) if latest else 'Not reported'),
-            ('Model',item.get('model') or 'Not reported'),('Seen',f"{item['state']} · {age(item.get('stamp'))}"),
+            ('Model',item.get('model') or 'Not reported'),
             ('Work',f"{summary.get('trace_count',0)} traces · {item.get('spans',0)} spans · {number(summary.get('input_tokens'))} in / {number(summary.get('output_tokens'))} out"),
             ('Cost','Not reported' if not summary or summary.get('unknown_cost_runs') else f"${summary.get('known_cost_usd',0):.4f} known")],
-            [('Session ID',item.get('session_id') or item['id'])])
+            ai_sections+[('Working directory',item.get('working_directory')),
+             ('Status evidence','No new session records for 35 seconds; the last reported wait may no longer be current.' if item['state']=='No updates' else 'Status comes from recorded lifecycle events. A tool response wait is not an approval request.')])
         actions=[event for event in self.data.activity if event.get('session_id')==item.get('session_id')] if item.get('session_id') else [event for event in self.data.activity if event.get('service')==item.get('service')]
         meaningful=[event for event in actions if event.get('domain') in {'shell','file','mcp','browser','model','message'}]
         actions=sorted(meaningful or actions,key=lambda event:event.get('time_unix_nano',0),reverse=True)
@@ -1078,6 +1114,10 @@ class ObservatoryApp(App):
     def row_selected(self,event):
         item=self.valid_row(event)
         if not item:return
+        if event.data_table.id=='mcp-servers':
+            self.query_one('#search-mcp',Input).value=item['server']
+            self.query_one('#mcp-table',DataTable).focus()
+            return
         if event.data_table.id!='agent-actions' and self.screen.has_class('compact'):
             self.action_expand()
             return
@@ -1165,8 +1205,47 @@ class ObservatoryApp(App):
             field=self.query_one('#search-'+event.button.id.removeprefix('clear-'),Input)
             field.value='';field.focus()
         elif event.button.id=='agent-open':self.action_focus_agent()
+        elif event.button.id=='agent-summary':self.request_ai_summary()
         elif event.button.id in {'activity-trace','mcp-trace'}:self.action_open_trace()
         elif event.button.id in {'activity-copy','mcp-copy'}:self.action_copy()
+
+    def request_ai_summary(self):
+        from .ai_summary import SummaryConfig, SummaryError
+        item=getattr(self,'source_map',{}).get(self.selected_source)
+        if not item or self.summary_busy:return
+        if item.get('review'):
+            self.notify('AI summaries exclude internal approval reviews.',severity='warning');return
+        try:
+            config=SummaryConfig.from_env()
+        except SummaryError as exc:
+            self.notify(str(exc),severity='warning',timeout=12);return
+        cached=self.ai_summaries.get(item['id'])
+        if cached and cached[0]==item.get('stamp'):
+            self.notify('Showing the existing summary for this snapshot.');return
+        self.summary_busy=True
+        self.query_one('#agent-summary',Button).label='Summarizing…'
+        self.show_agent()
+        self.summarize_agent(dict(item),config)
+
+    @work(group='ai-summary')
+    async def summarize_agent(self,item,config):
+        from .ai_summary import generate_summary, summary_evidence, SummaryError
+        try:
+            params={'limit':30,'service':item.get('service') or '',
+                    'session_id':item.get('session_id') or '', 'include_reviews':0}
+            page=await asyncio.to_thread(self.feed.api.get,'/api/activity?'+urlencode(params))
+            evidence=summary_evidence(item,page.get('activity',[]))
+            result=await asyncio.to_thread(generate_summary,config,evidence)
+            self.ai_summaries[item['id']]=(item.get('stamp'),result)
+            if len(self.ai_summaries)>50:self.ai_summaries.pop(next(iter(self.ai_summaries)))
+        except SummaryError as exc:
+            self.notify(str(exc),severity='error',timeout=10)
+        except Exception:
+            self.notify('Could not load session evidence for the summary. Retry when the receiver is connected.',severity='error')
+        finally:
+            self.summary_busy=False
+            self.query_one('#agent-summary',Button).label='AI summary'
+            self.show_agent()
 
     def action_pause(self):
         self.feed.paused=not self.feed.paused;self.query_one('#pause',Button).label='Resume' if self.feed.paused else 'Pause';self.feed.request_refresh();self.refresh_data()

@@ -1,7 +1,7 @@
 """Observe local agent session metadata without changing or restarting agents.
 
-Session files are read-only. Text, reasoning, arguments, and tool results never
-enter telemetry. These adapters are best effort because agent log formats vary.
+Session files are read-only. Content capture is bounded and redacted; metadata-only
+mode omits task text, arguments, and results. Agent log formats vary by version.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .core import normalize_native
+from .local_activity import mcp_attributes, mcp_failed
 
 MAX_READ = 8 * 1024 * 1024
 MAX_LINE = 2 * 1024 * 1024
@@ -60,6 +61,12 @@ class Session:
         self.turn = "session"
         self.model = None
         self.project = ""
+        self.working_directory = ""
+        self.branch = ""
+        self.run_state = "unknown"
+        self.state_since = 0
+        self.waiting_for = ""
+        self.pending_tools = {}
         self.started = {}
         self.calls = {}
         self.usage = {}
@@ -71,6 +78,77 @@ class Session:
         self.last_state = None
         self.skipped = 0
         self.last_activity = None
+
+    def observe_state(self, row, stamp):
+        """Track explicit lifecycle records; absence of output is not an approval wait."""
+        payload = (row.get("payload") or {}) if self.runtime == "Codex" else row
+        if not isinstance(payload, dict):
+            return
+        cwd = payload.get("cwd")
+        if cwd:
+            self.project = Path(cwd).name
+            self.working_directory = str(cwd) if self.capture_details else ""
+        git = payload.get("git") or {}
+        branch = payload.get("gitBranch") or (git.get("branch") if isinstance(git, dict) else None)
+        if branch and self.capture_details:
+            self.branch = str(branch)
+        state = self.run_state
+        event = payload.get("type")
+        if self.runtime == "Codex":
+            if row.get("type") == "event_msg":
+                if event in {"task_started", "task_complete", "task_aborted"}:
+                    state = {"task_started": "running", "task_complete": "completed", "task_aborted": "interrupted"}[event]
+                    self.pending_tools.clear()
+                elif event in {"approval_request", "request_user_input"}:
+                    state = "waiting"
+                    self.waiting_for = "Approval" if event == "approval_request" else "User input"
+            if row.get("type") == "response_item":
+                key = str(payload.get("call_id") or payload.get("id"))
+                if event in {"function_call", "custom_tool_call"}:
+                    name = str(payload.get("name") or "Tool")
+                    self.pending_tools[key] = name
+                    state = "running"
+                elif event in {"function_call_output", "custom_tool_call_output"}:
+                    self.pending_tools.pop(key, None)
+                    state = "running"
+                    self.waiting_for = ""
+        else:
+            message = row.get("message") or {}
+            if not isinstance(message, dict):
+                return
+            blocks = message.get("content")
+            blocks = blocks if isinstance(blocks, list) else []
+            if row.get("type") == "user" and not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in blocks):
+                state = "running"
+                self.pending_tools.clear()
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    self.pending_tools[str(block.get("id"))] = str(block.get("name") or "Tool")
+                    state = "running"
+                elif block.get("type") == "tool_result":
+                    self.pending_tools.pop(str(block.get("tool_use_id")), None)
+                    state = "running"
+                    self.waiting_for = ""
+            if message.get("stop_reason") == "end_turn":
+                state = "completed"
+                self.pending_tools.clear()
+        if self.pending_tools:
+            names = list(self.pending_tools.values())
+            if any(name.rsplit(".", 1)[-1] in {"request_user_input", "AskUserQuestion"} for name in names):
+                state, self.waiting_for = "waiting", "User input"
+            else:
+                mcp = mcp_attributes(names[-1])
+                label = mcp["mcp.server.name"] + " / " + mcp["mcp.tool.name"] if mcp else names[-1]
+                self.waiting_for = "Tool response: " + label
+                if len(names) > 1:
+                    self.waiting_for += f" (+{len(names)-1} pending)"
+        elif state != "waiting":
+            self.waiting_for = ""
+        if state != self.run_state:
+            self.state_since = stamp
+        self.run_state = state
 
     def span(self, key, name, stamp, attrs=None, *, start=None, parent=True, error=False):
         if not stamp:
@@ -118,7 +196,7 @@ class Session:
             return []
         if kind == "session_meta":
             self.session_id = str(payload.get("id") or payload.get("session_id") or self.session_id)
-            self.project = Path(payload.get("cwd") or "").name
+            self.project = Path(payload["cwd"]).name if payload.get("cwd") else self.project
         elif kind == "turn_context":
             self.turn = str(payload.get("turn_id") or self.turn)
             self.model = payload.get("model") or self.model
@@ -128,12 +206,27 @@ class Session:
                 self.service = "codex-review"
                 self.tasks.clear()
                 self.store.redact_internal_source(self.source_id)
-            self.project = Path(payload.get("cwd") or "").name
+            self.project = Path(payload["cwd"]).name if payload.get("cwd") else self.project
         elif kind == "token_usage_record":
             self.modern_usage = True
             self.turn = str(payload.get("turn_id") or self.turn)
             key = payload.get("response_id") or row.get("ordinal") or row.get("timestamp")
             return [self.model_span(("model", key), payload.get("usage"), stamp)]
+        elif kind == "response_item":
+            event = payload.get("type")
+            key = str(payload.get("call_id") or payload.get("id"))
+            if event in {"function_call", "custom_tool_call"}:
+                name = str(payload.get("name") or "Tool")
+                if mcp_attributes(name):
+                    self.calls[key] = (name, stamp, self.turn)
+            elif event in {"function_call_output", "custom_tool_call_output"} and key in self.calls:
+                name, start, turn = self.calls[key]
+                previous, self.turn = self.turn, turn
+                span = self.span(("tool", key), name, stamp,
+                    {"gen_ai.operation.name": "execute_tool", "tool.name": name, **mcp_attributes(name)},
+                    start=start, error=mcp_failed(payload.get("output")))
+                self.turn = previous
+                return [span]
         elif kind == "event_msg":
             event = payload.get("type")
             self.turn = str(payload.get("turn_id") or self.turn)
@@ -165,7 +258,7 @@ class Session:
                     code = item.get("exit_code")
                     if isinstance(code, int):
                         attrs["process.exit.code"] = code
-                    error = item.get("status") in {"failed", "error"} or isinstance(code, int) and code != 0
+                    error = item.get("status") in {"failed", "error"} or isinstance(code, int) and code != 0 or (tool_type == "McpToolCall" and mcp_failed(item.get("result")))
                     end = timestamp(payload.get("completed_at_ms")) or stamp
                     start = timestamp(payload.get("started_at_ms"))
                     from .local_activity import duration
@@ -181,7 +274,7 @@ class Session:
 
     def claude(self, row, stamp):
         self.session_id = str(row.get("sessionId") or self.session_id)
-        self.project = Path(row.get("cwd") or "").name
+        self.project = Path(row["cwd"]).name if row.get("cwd") else self.project
         message = row.get("message") or {}
         if not isinstance(message, dict):
             return []
@@ -196,10 +289,10 @@ class Session:
                 result.append(self.root(stamp, "running"))
             for block in tools:
                 key = block.get("tool_use_id")
-                name, start, turn = self.calls.pop(key, ("Claude tool", stamp, self.turn))
+                name, start, turn = self.calls.get(key, ("Claude tool", stamp, self.turn))
                 previous, self.turn = self.turn, turn
                 result.append(self.span(("tool", key), name, stamp,
-                    {"gen_ai.operation.name": "execute_tool", "tool.name": name},
+                    {"gen_ai.operation.name": "execute_tool", "tool.name": name, **mcp_attributes(name)},
                     start=start, error=bool(block.get("is_error"))))
                 self.turn = previous
         elif row.get("type") == "assistant":
@@ -213,7 +306,7 @@ class Session:
                 result.append(self.model_span(("model", key), previous, stamp, claude=True))
             for block in blocks:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    self.calls[block.get("id")] = (str(block.get("name") or "Claude tool")[:128], stamp, self.turn)
+                    self.calls[block.get("id")] = (str(block.get("name") or "Claude tool"), stamp, self.turn)
             if message.get("stop_reason") == "end_turn":
                 result.append(self.root(stamp, "completed"))
         return result
@@ -230,6 +323,8 @@ class Session:
             self.usage.clear()
             self.tasks.clear()
             self.tool_inputs.clear()
+            self.pending_tools.clear()
+            self.run_state, self.waiting_for, self.state_since = "unknown", "", 0
         with self.path.open("rb") as stream:
             if self.offset == 0 and stat.st_size > MAX_READ:
                 # Recover session identity from the header, then import a bounded tail.
@@ -272,6 +367,7 @@ class Session:
                 stamp = timestamp(row.get("timestamp"))
                 spans.extend(span for span in (self.codex(row, stamp) if self.runtime == "Codex" else self.claude(row, stamp)) if span)
                 logs.extend(codex_activity(self, row, stamp) if self.runtime == "Codex" else claude_activity(self, row, stamp))
+                self.observe_state(row, stamp)
                 if self.capture_details and self.turn in self.tasks and self.turn in self.started:
                     payload = row.get("payload") or {}
                     if (self.runtime == "Codex" and isinstance(payload, dict) and (payload.get("item") or {}).get("type") == "UserMessage") or (self.runtime == "Claude Code" and row.get("type") == "user" and plaintext_task(row)):
@@ -296,7 +392,8 @@ class Session:
             self.last_activity = {"time_unix_nano": last["time_unix_nano"],
                                   "domain": last["attributes"].get("agent.activity.domain"),
                                   "action": last["attributes"].get("agent.activity.action"),
-                                  "subject": last["attributes"].get("agent.activity.subject")}
+                                  "subject": last["attributes"].get("agent.activity.subject"),
+                                  "result": last["attributes"].get("agent.activity.result")}
         state = "running" if time.time() - stat.st_mtime < 35 else "stopped"
         if time.monotonic() - self.last_heartbeat > 10 or state != self.last_state:
             self.store.register_connection({"source_id": self.source_id, "service": self.service,
@@ -384,6 +481,9 @@ class LocalAgents:
                 "sessions": [{"source_id": session.source_id, "runtime": session.runtime,
                               "service": session.service, "session_id": session.session_id,
                               "project": session.project, "model": session.model,
+                              "working_directory": session.working_directory, "branch": session.branch,
+                              "run_state": session.run_state, "state_since_ns": session.state_since,
+                              "waiting_for": session.waiting_for,
                               "task": "Approval review" if session.internal else (session.tasks.get(session.turn) or "")[:500],
                               "capture_content": session.capture_details,
                               "last_activity": session.last_activity,

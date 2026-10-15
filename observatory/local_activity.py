@@ -34,7 +34,26 @@ def plaintext(content):
                          if isinstance(block, dict) and block.get("type") in {"text", "input_text", "output_text"}))
 
 
-def emit(session, row, stamp, domain, action, subject, detail="", result="observed", extra=None):
+def mcp_attributes(name):
+    """Recognize qualified MCP names without guessing from ordinary tool names."""
+    parts = str(name).split("__", 2)
+    if len(parts) == 3 and parts[0] == "mcp" and parts[1] and parts[2]:
+        return {"mcp.server.name": parts[1], "mcp.tool.name": parts[2],
+                "mcp.method.name": "tools/call"}
+    return {}
+
+
+def mcp_failed(value):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return False
+    return isinstance(value, dict) and bool(value.get("isError") or value.get("is_error"))
+
+
+def emit(session, row, stamp, domain, action, subject, detail="", result="observed", extra=None,
+         *, call_id=None, turn=None):
     if not stamp:
         return None
     from .local_agents import identity
@@ -43,13 +62,15 @@ def emit(session, row, stamp, domain, action, subject, detail="", result="observ
              "agent.activity.action": action, "agent.activity.subject": safe(subject, 500),
              "agent.activity.result": result, "agent.activity.actor": session.runtime,
              "observatory.record_id": identity(session.source_id, row.get("ordinal") or row.get("uuid") or stamp,
-                                                domain, action, str(subject)[:500]), **(extra or {})}
+                                                domain, action, str(subject)[:500], *([call_id] if call_id else [])), **(extra or {})}
     payload = row.get("payload") or {}
     item = payload.get("item") or {} if isinstance(payload, dict) else {}
     span_id = None
     if isinstance(item, dict) and item.get("type") in {"CommandExecution", "FileChange", "McpToolCall", "Extension"}:
         span_id = identity(session.source_id, ("tool", item.get("id") or row.get("ordinal") or stamp), size=16)
-    return {"trace_id": identity(session.source_id, session.turn), "span_id": span_id,
+    if call_id:
+        span_id = identity(session.source_id, ("tool", call_id), size=16)
+    return {"trace_id": identity(session.source_id, turn or session.turn), "span_id": span_id,
             "time_unix_nano": stamp, "service": session.service,
             "severity_number": 17 if result in {"error", "failed", "denied"} else 9,
             "severity_text": "ERROR" if result in {"error", "failed", "denied"} else "INFO",
@@ -89,7 +110,10 @@ def codex_activity(session, row, stamp):
         session.tool_inputs[str(payload.get("call_id") or payload.get("id"))] = (name, safe(args))
         subject = name
         domain = "tool"
-        if isinstance(parsed, dict):
+        mcp = mcp_attributes(name)
+        if mcp:
+            domain, subject = "mcp", mcp["mcp.server.name"]
+        elif isinstance(parsed, dict):
             command = parsed.get("cmd") or parsed.get("command")
             if command:
                 domain, subject = "shell", str(command)
@@ -98,11 +122,18 @@ def codex_activity(session, row, stamp):
             elif parsed.get("path"):
                 domain, subject = "file", str(parsed["path"])
         out.append(emit(session, row, stamp, domain, "call", subject if session.capture_details else name,
-                        args, "started", {"tool.name": name[:128]}))
+                        {"arguments": parsed or args} if mcp else args, "started", {"tool.name": name, **mcp},
+                        call_id=payload.get("call_id") or payload.get("id") if mcp else None))
     elif kind == "response_item" and event in {"function_call_output", "custom_tool_call_output"}:
         key = str(payload.get("call_id") or payload.get("id"))
         name, _ = session.tool_inputs.get(key, ("Tool", ""))
-        out.append(emit(session, row, stamp, "tool", "result", name, payload.get("output") or "", "observed"))
+        mcp = mcp_attributes(name)
+        output = payload.get("output") or ""
+        pending = session.calls.pop(key, None) if mcp else None
+        out.append(emit(session, row, stamp, "mcp" if mcp else "tool", "result", name,
+                        {"result": output} if mcp else output,
+                        "error" if mcp_failed(output) else "success" if mcp else "observed", mcp,
+                        call_id=key if mcp else None, turn=pending[2] if pending else None))
     elif kind == "event_msg" and event in {"task_started", "task_complete", "task_aborted"}:
         action = "started" if event == "task_started" else "completed" if event == "task_complete" else "interrupted"
         out.append(emit(session, row, stamp, "agent", action, session.project or session.runtime,
@@ -193,12 +224,21 @@ def claude_activity(session, row, stamp):
             name, args = str(block.get("name") or "Tool"), block.get("input") or {}
             domain = "shell" if name.lower() in {"bash", "shell", "terminal"} else "file" if name.lower() in {"read", "write", "edit", "glob", "grep", "multiedit"} else "browser" if name.lower() in {"webfetch", "websearch"} else "tool"
             subject = args.get("command") or args.get("file_path") or args.get("path") or args.get("url") or args.get("query") or name if isinstance(args, dict) else name
+            mcp = mcp_attributes(name)
+            if mcp:
+                domain, subject = "mcp", mcp["mcp.server.name"]
             session.tool_inputs[str(block.get("id"))] = (name, safe(subject, 500))
-            out.append(emit(session, row, stamp, domain, name, subject if session.capture_details else name, args, "started", {"tool.name": name}))
+            out.append(emit(session, row, stamp, domain, name, subject if session.capture_details else name,
+                {"arguments": args} if mcp else args, "started", {"tool.name": name, **mcp},
+                call_id=block.get("id") if mcp else None))
         elif block.get("type") == "tool_result":
             name, subject = session.tool_inputs.get(str(block.get("tool_use_id")), ("Tool", "Tool result"))
-            out.append(emit(session, row, stamp, "tool", name+" result", subject if session.capture_details else name,
-                block.get("content") or "", "error" if block.get("is_error") else "success"))
+            mcp = mcp_attributes(name)
+            pending = session.calls.pop(block.get("tool_use_id"), None)
+            output = block.get("content") or ""
+            out.append(emit(session, row, stamp, "mcp" if mcp else "tool", name+" result", subject if session.capture_details else name,
+                {"result": output} if mcp else output, "error" if block.get("is_error") else "success", mcp,
+                call_id=block.get("tool_use_id") if mcp else None, turn=pending[2] if pending else None))
         elif block.get("type") == "thinking":
             out.append(emit(session, row, stamp, "agent", "processing", "Model processing"))
     if row.get("type") == "system":

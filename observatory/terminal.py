@@ -160,6 +160,7 @@ class Snapshot:
     activity: list = field(default_factory=list)
     sessions: list = field(default_factory=list)
     mcp: list = field(default_factory=list)
+    mcp_summary: dict = field(default_factory=dict)
     mcp_available: bool = True
     activity_results: list | None = None
     mcp_results: list | None = None
@@ -233,6 +234,7 @@ class Feed:
                                   'include_reviews':int(include_reviews)}
                     mcp_page = self.api.get('/api/mcp?'+urlencode(mcp_params))
                     mcp = mcp_page['calls']
+                    mcp_summary = mcp_page.get('summary', {})
                     if mcp_query or history['mcp'][-1]:
                         mcp_page = self.api.get('/api/mcp?'+urlencode({**mcp_params,'q':mcp_query,
                             'cursor':history['mcp'][-1] or ''}))
@@ -241,10 +243,10 @@ class Feed:
                 except urllib.error.HTTPError as exc:
                     if exc.code!=404:
                         raise
-                    mcp,mcp_results,mcp_available,mcp_page=[],[],False,{}
-                self.extra_cache = sessions,mcp,mcp_results,mcp_available,mcp_page
+                    mcp,mcp_results,mcp_available,mcp_page,mcp_summary=[],[],False,{},{}
+                self.extra_cache = sessions,mcp,mcp_results,mcp_available,mcp_page,mcp_summary
                 self.extra_scope,self.extra_updated = scope,time.monotonic()
-            sessions,mcp,mcp_results,mcp_available,mcp_page=self.extra_cache
+            sessions,mcp,mcp_results,mcp_available,mcp_page,mcp_summary=self.extra_cache
             page_result('mcp',mcp_page)
             params = {"limit": 100, "service": service, "session_id": session_id, "q": query,
                       "cursor":history['traces'][-1] or '', 'include_reviews':int(include_reviews)}
@@ -285,7 +287,7 @@ class Feed:
                 return
             self.selected_trace = selected
             self.snapshot = Snapshot(totals, agents, traces, detail, findings, updated=time.time(), local_status=local_status, activity=activity,
-                                     sessions=sessions,mcp=mcp,mcp_available=mcp_available,
+                                     sessions=sessions,mcp=mcp,mcp_available=mcp_available,mcp_summary=mcp_summary,
                                      activity_results=activity_results[:200],mcp_results=mcp_results,
                                      queries={'activity':activity_query,'mcp':mcp_query,'traces':query},pagination=pagination)
         except Exception as exc:

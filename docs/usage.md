@@ -1,3 +1,7 @@
+## 0.1.2 · Native session status, MCP inventory, optional AI summary
+
+Shows agent and session IDs, repo/project, lifecycle status, update age, pending wait, and task details. MCP server calls now link across start/result events, expose qualified Claude Code and Codex tool names, report completion/error status, and include all stored history in server counts. Optional provider-backed session summaries run only when requested. DuckDB guidance is in [the storage evaluation](decisions/duckdb.md).
+
 # Agent Observatory
 
 A local, framework-independent receiver and investigation dashboard for AI agents. It accepts **OTLP/HTTP traces, logs, and metrics in protobuf or JSON** from OpenTelemetry-instrumented runtimes and the existing **agent-harness JSONL** format. A single trace view shows parent-linked spans, span links, correlated logs, progress, model usage, latency, known cost, and evidence-linked findings. The metric explorer charts one instrument at a time, keeping kind, temporality, scope, unit, resource, and attribute series separate; it plots gauge/sum values and lets you select distribution count, sum, min/max, summary quantiles, or one latest explicit/exponential histogram bucket distribution with its source attributes shown. Data lives in SQLite. The receiver uses Python's standard library (3.11+); the terminal UI uses Textual.
@@ -289,3 +293,58 @@ This is a working local vertical slice, not an Origin equivalent. Automatic capt
 ## Workspace integration check
 
 The offline LangGraph retrieval control was run and imported alongside the harness demo. The resulting database contained 3 runs and 23 spans across `agent-harness` and `langgraph`; joining the control's `results.json` correctly marked its failed baseline `FAILED` and its passing control `OK`. This verifies ingestion and outcome correlation for those two local producers, not automatic instrumentation of arbitrary applications.
+
+## Agent session overview
+
+The terminal's **Agents** view lists agent, session ID, repo/project, reported status,
+last update, waiting reason, and current/last task. Select a row for the full session
+ID, working directory, branch (when recorded), model, usage, and recent work.
+Press **Enter** to inspect; **e** expands the details and **s** opens session activity.
+Long values remain available in the selectable, copyable detail pane.
+
+Status comes from native lifecycle records: **Working**, **Waiting**, **Completed**,
+or **Interrupted**. A known input request shows **User input**; a pending tool shows
+**Tool response** and its name. After 35 seconds without new evidence, an unfinished
+session shows **No updates**. That does not prove the process stopped or that an
+approval is required. Unrecognized/missing lifecycle records remain **Unknown**.
+SDK connections report connection state separately from native session state.
+
+The **MCP Calls** view includes an observed server inventory for the entire stored
+scope. Select a server and press **Enter** to search its calls. Counters include older
+calls beyond the current page; the table's count describes the displayed page.
+Configured servers without observed calls are not a connectivity inventory.
+Claude Code and Codex qualified names (`mcp__server__tool`) and Codex explicit MCP
+completion records carry server/tool identity. Restart the receiver after upgrading
+to re-read discoverable local session files; the existing 24-hour discovery window
+and bounded file reading limits still apply.
+
+## Optional AI summaries
+
+AI summaries are off until you configure a provider. In **Agents**, select a session
+and click **AI summary**. This sends its task, project, reported state, waiting reason,
+and up to 30 recent action headlines to your chosen provider. It uses your API quota.
+Raw tool payloads, working directories, hidden reasoning, and environment values are
+excluded. Recognizable secrets are redacted, but task/headline text may still contain
+private project information. Only enable this with a provider appropriate for that data.
+
+Set these in the terminal that launches Observatory:
+
+```sh
+export OBSERVATORY_SUMMARY_URL='https://api.openai.com/v1/chat/completions'
+export OBSERVATORY_SUMMARY_MODEL='YOUR_MODEL_ID'
+export OBSERVATORY_SUMMARY_KEY_ENV='OPENAI_API_KEY'
+# OPENAI_API_KEY must already be set securely in this terminal.
+agent-observatory
+```
+
+The URL is the full **Chat Completions** endpoint, and the model must be available to
+your account. Other compatible providers can use their endpoint, model, and API key
+variable. The default key variable is `OBSERVATORY_SUMMARY_API_KEY`. A compatible local
+server can use an HTTP localhost URL without an API key. No key is saved to the database.
+The request uses `max_completion_tokens` and `store: false`; compatible providers must
+support those fields. See the [API request schema](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
+
+Summaries run only on request, in the background. An unchanged snapshot reuses its
+summary for the lifetime of the UI; new session activity marks it as an earlier snapshot.
+Provider failures leave the dashboard available. Generated text is labeled and does
+not override recorded status. Internal approval reviews are excluded.

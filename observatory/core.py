@@ -974,10 +974,11 @@ class Store:
         span_key = "trace_id || ':' || span_id"
         log_key = "CASE WHEN trace_id IS NOT NULL AND span_id IS NOT NULL THEN trace_id || ':' || span_id ELSE digest END"
         def mcp_identity(alias):
-            return (f"COALESCE(json_extract({alias}.attributes,'$.\"mcp.server.name\"'),'Not reported')",
-                    f"COALESCE(json_extract({alias}.attributes,'$.\"mcp.tool.name\"'),"
-                    f"json_extract({alias}.attributes,'$.\"tool.name\"'),"
-                    f"json_extract({alias}.attributes,'$.\"agent.activity.action\"'),'Not reported')")
+            def value(key):
+                return f"NULLIF(json_extract({alias}.attributes,'$.\"{key}\"'),'')"
+            return (f"COALESCE({value('mcp.server.name')},{value('server.address')},'Not reported')",
+                    f"COALESCE({value('mcp.tool.name')},{value('gen_ai.tool.name')},"
+                    f"{value('tool.name')},{value('agent.activity.action')},'Not reported')")
         server,tool=mcp_identity('logs')
         linked_server,linked_tool=mcp_identity('linked')
         unique_log=f"""(span_id IS NOT NULL OR NOT EXISTS (
@@ -987,7 +988,28 @@ class Store:
         query_filter = ' HAVING MAX(instr(lower(evidence),lower(?)))>0' if query else ''
         cursor_filter = ' WHERE (stamp,call_key) < (?,?)' if before else ''
         values = [*params, *params, *([query] if query else []), *(before or ()), limit+1]
+        span_server, span_tool = mcp_identity('spans')
+        summary_sql = f"""WITH evidence AS (
+            SELECT {span_key} AS call_key, {span_server} AS server, {span_tool} AS tool,
+                   status IN ('ERROR','FAILED') AS failed FROM spans WHERE {where}
+            UNION ALL
+            SELECT {log_key}, {server}, {tool},
+                   COALESCE(json_extract(attributes,'$."agent.activity.result"') IN ('error','failed','denied','blocked'),0)
+            FROM logs WHERE {where} AND {unique_log}
+        ), calls AS (
+            SELECT call_key, COALESCE(MAX(NULLIF(server,'Not reported')),'Not reported') AS server,
+                   COALESCE(MAX(NULLIF(tool,'Not reported')),'Not reported') AS tool, MAX(failed) AS failed
+            FROM evidence GROUP BY call_key
+        ) SELECT server, COUNT(*) AS calls, SUM(failed) AS errors,
+                 COUNT(DISTINCT NULLIF(tool,'Not reported')) AS tools
+          FROM calls GROUP BY server ORDER BY server"""
         with self._connect() as db:
+            inventory = [dict(row) for row in db.execute(summary_sql, [*params, *params])]
+            summary = {'calls': sum(row['calls'] for row in inventory),
+                       'errors': sum(row['errors'] for row in inventory),
+                       'tools': sum(row['tools'] for row in inventory),
+                       'servers': [row for row in inventory if row['server'] != 'Not reported'],
+                       'unknown_server_calls': sum(row['calls'] for row in inventory if row['server'] == 'Not reported')}
             candidates = db.execute(f"""WITH evidence AS (
                 SELECT {span_key} AS call_key,end_ns AS stamp,attributes || name || service AS evidence FROM spans WHERE {where}
                 UNION ALL
@@ -997,7 +1019,7 @@ class Store:
             ) SELECT * FROM calls {cursor_filter} ORDER BY stamp DESC,call_key DESC LIMIT ?""", values).fetchall()
             selected_keys = [row['call_key'] for row in candidates[:limit]]
             if not selected_keys:
-                return {'calls': [], 'next_cursor': None}
+                return {'calls': [], 'next_cursor': None, 'summary': summary}
             placeholders = ','.join('?' for _ in selected_keys)
             spans = db.execute(f"SELECT * FROM spans WHERE {span_key} IN ({placeholders})",selected_keys).fetchall()
             logs = db.execute(f"SELECT * FROM logs WHERE {log_key} IN ({placeholders}) ORDER BY time_ns DESC,digest DESC",selected_keys).fetchall()
@@ -1026,16 +1048,19 @@ class Store:
                 details = {}
             old = calls.get(key, {})
             result = str(attrs.get('agent.activity.result') or '').lower()
+            state = 'ERROR' if result in {'error','failed','denied','blocked'} else 'RUNNING' if result=='started' else 'OK' if result in {'success','completed'} else old.get('status') or 'OK'
+            if old.get('time_unix_nano', 0) > log['time_ns']:
+                state = old.get('status') or state
             calls[key] = {**old, 'id': key, 'trace_id': log['trace_id'], 'span_id': log['span_id'],
                 'session_id': attrs.get('session.id'), 'service': log['service'],
-                'server': attrs.get('mcp.server.name') or old.get('server') or 'Not reported',
+                'server': attrs.get('mcp.server.name') or attrs.get('server.address') or old.get('server') or 'Not reported',
                 'tool': attrs.get('mcp.tool.name') or attrs.get('tool.name') or old.get('tool') or attrs.get('agent.activity.action') or 'Not reported',
                 'method': attrs.get('mcp.method.name') or old.get('method') or 'tools/call',
-                'status': 'ERROR' if result in {'error','failed','denied','blocked'} else 'RUNNING' if result=='started' else old.get('status') or 'OK',
-                'time_unix_nano': log['time_ns'], 'duration_ms': attrs.get('duration_ms', old.get('duration_ms')),
+                'status': state,
+                'time_unix_nano': max(log['time_ns'],old.get('time_unix_nano',0)), 'duration_ms': attrs.get('duration_ms', old.get('duration_ms')),
                 'arguments': details.get('arguments') or old.get('arguments') or '',
                 'output': details.get('result') or old.get('output') or '',
-                'source': 'session log + span' if old else 'session log', 'log_id': log['digest']}
+                'source': 'session log + span' if 'span' in old.get('source', '') else 'session log', 'log_id': log['digest']}
         # Older adapters recorded a log without its span ID. Prefer the linked
         # record for the same exact event; preserve distinct explicit spans.
         linked = {(item['trace_id'],item['server'],item['tool'],item['time_unix_nano'])
@@ -1046,7 +1071,7 @@ class Store:
         by_id = {item['id']: item for item in items}
         items = [by_id[key] for key in selected_keys if key in by_id]
         next_cursor = self._next_event_cursor(candidates[limit-1]['stamp'],candidates[limit-1]['call_key']) if len(candidates)>limit else None
-        return {'calls': items, 'next_cursor': next_cursor}
+        return {'calls': items, 'next_cursor': next_cursor, 'summary': summary}
 
     def ingest_metrics(self, points):
         rows = []
