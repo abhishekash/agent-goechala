@@ -1,6 +1,7 @@
 # Agent Observatory
 
 [![CI](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/abhishekash/agent-observatory?style=social)](https://github.com/abhishekash/agent-observatory/stargazers)
 [![PyPI](https://img.shields.io/pypi/v/agent-observatory-cli)](https://pypi.org/project/agent-observatory-cli/)
 [![Downloads](https://img.shields.io/pypi/dm/agent-observatory-cli?label=downloads%2Fmonth)](https://pypistats.org/packages/agent-observatory-cli)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
