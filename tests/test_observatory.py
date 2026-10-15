@@ -316,6 +316,10 @@ class ObservatoryTest(unittest.TestCase):
         self.assertEqual(request("/api/spans", {"service": "custom-agent", "spans": [span]})[1]["accepted"], 1)
         request("/api/progress", {"trace_id": TID, "stage": "retrieving", "message": "2 docs", "percent": 50})
         self.assertEqual(request("/api/traces")[1]["traces"][0]["services"], ["custom-agent"])
+        self.assertIn('next_cursor', request('/api/activity')[1])
+        self.assertIn('next_cursor', request('/api/mcp')[1])
+        self.assertEqual(request('/api/activity?cursor=invalid')[0], 400)
+        self.assertEqual(request('/api/mcp?cursor=invalid')[0], 400)
         self.assertEqual(request("/api/traces/" + TID)[1]["progress"][0]["stage"], "retrieving")
         otlp = {"resourceSpans": [{"resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "other-agent"}}]},
                 "scopeSpans": [{"spans": [{"traceId": "b" * 32, "spanId": CHILD,

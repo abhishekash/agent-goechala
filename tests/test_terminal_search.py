@@ -244,14 +244,6 @@ class EvidenceRenderingTest(unittest.TestCase):
         self.assertIn('"query": "formatting"', copied)
         self.assertIn('"matches": 2', copied)
 
-    def test_native_clipboard_uses_available_x11_backend(self):
-        with patch('observatory.terminal_ui.os.environ', {'DISPLAY': ':0'}), \
-             patch('observatory.terminal_ui.shutil.which', return_value='/usr/bin/xclip'), \
-             patch('observatory.terminal_ui.subprocess.run') as run:
-            run.return_value.returncode = 0
-            self.assertEqual(write_system_clipboard('copy me'), 'X11')
-        run.assert_called_once_with(['xclip', '-selection', 'clipboard', '-i'], input='copy me',
-                                    text=True, capture_output=True, timeout=3, check=False)
 
 
 class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):

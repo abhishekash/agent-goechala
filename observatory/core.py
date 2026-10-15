@@ -872,31 +872,94 @@ class Store:
                  "resource_attributes": json.loads(r["resource_attributes"]),
                  "scope_name": r["scope_name"]} for r in rows]
 
+    @staticmethod
+    def _event_cursor(cursor):
+        if not cursor:
+            return None
+        try:
+            stamp, key = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+            if not isinstance(stamp, int) or not isinstance(key, str) or len(key) > 512:
+                raise ValueError
+            return stamp, key
+        except (ValueError, TypeError, UnicodeDecodeError) as exc:
+            raise ValueError("invalid cursor") from exc
+
+    @staticmethod
+    def _next_event_cursor(stamp, key):
+        return base64.urlsafe_b64encode(json.dumps([stamp, key]).encode()).decode().rstrip("=")
+
     def recent_activity(self, limit=100, service=None, domain=None, query=None, session_id=None):
-        """Activity from the latest 100 observed traces, bounded for live panels."""
+        return self.activity_page(limit, service, domain, query, session_id)["activity"]
+
+    def activity_page(self, limit=100, service=None, domain=None, query=None, session_id=None,
+                      cursor=None, include_reviews=True, errors_only=False):
+        """Browse saved activity, including logs older than the trace preview window."""
         limit = max(1, min(500, int(limit)))
+        before = self._event_cursor(cursor)
+        conditions, params = [], []
+        for expression, value in (("s.session_id", session_id),
+                                  ("json_extract(s.value,'$.service')", service),
+                                  ("json_extract(s.value,'$.domain')", domain)):
+            if value:
+                conditions.append(expression + "=?")
+                params.append(value)
+        if not include_reviews:
+            conditions.append("COALESCE(json_extract(s.value,'$.service'),'')!='codex-review'")
+        if errors_only:
+            conditions.append("lower(json_extract(s.value,'$.result')) IN ('error','failed','denied','blocked','policy_denied','incomplete')")
+        if query:
+            conditions.append("instr(lower(s.value),lower(?))>0")
+            params.append(query)
+        stamp = "json_extract(s.value,'$.time_unix_nano')"
+        key = "COALESCE(s.trace_id,'log') || ':' || json_extract(s.value,'$.source_id')"
+        if before:
+            conditions.append(f"({stamp},{key}) < (?,?)")
+            params.extend(before)
+        where = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+        # Trace summaries contain span-derived activity. Read log activity from
+        # its source table so a busy trace's preview limit cannot hide history.
+        def attr(*keys, default="''"):
+            fields=[f"NULLIF(json_extract(l.attributes,'$.\"{key}\"'),'')" for key in keys]
+            return 'COALESCE(' + ','.join([*fields,default]) + ')'
+        fields={
+            'time_unix_nano':'l.time_ns', 'service':'l.service', 'source':"'log'",
+            'source_id':'l.digest', 'span_id':'l.span_id',
+            'domain':attr('agent.activity.domain','activity.domain',default="'other'"),
+            'action':attr('agent.activity.action','activity.action',default="'activity'"),
+            'subject':attr('agent.activity.subject','agent.activity.target','activity.subject','activity.target'),
+            'result':attr('agent.activity.result','activity.result',default="'unknown'"),
+            'actor':attr('agent.activity.actor','agent.actor'),
+            'mcp_server':attr('mcp.server.name'), 'mcp_tool':attr('mcp.tool.name'),
+            'duration_ms':"json_extract(l.attributes,'$.duration_ms')",
+            'detail':"CASE WHEN json_type(l.body)='text' THEN json_extract(l.body,'$') ELSE '' END",
+        }
+        log_value='json_object(' + ','.join(f"'{key}',{value}" for key,value in fields.items()) + ')'
+        session=attr(*SESSION_KEYS,default='NULL')
+        activity_sql=f"""WITH activity AS (
+            SELECT cached.trace_id,cached.session_id,e.value FROM trace_summaries cached,
+                json_each(cached.activity_json) e WHERE json_extract(e.value,'$.source')!='log'
+            UNION ALL
+            SELECT l.trace_id,COALESCE(cached.session_id,{session}),{log_value}
+                FROM logs l LEFT JOIN trace_summaries cached ON cached.trace_id=l.trace_id
+                WHERE l.event_name='agent.activity'
+        )"""
         with self._connect() as db:
-            rows = db.execute("""SELECT a.trace_id,s.activity_json,s.session_id FROM trace_activity a
-                JOIN trace_summaries s ON s.trace_id=a.trace_id
-                ORDER BY a.last_ns DESC,a.trace_id DESC LIMIT 100""").fetchall()
-        items = []
-        for row in rows:
-            if session_id and row["session_id"] != session_id:
-                continue
-            for event in json.loads(row["activity_json"]):
-                if service and event.get("service") != service:
-                    continue
-                if domain and event.get("domain") != domain:
-                    continue
-                if query and query.casefold() not in " ".join(str(event.get(key) or "") for key in ("domain", "action", "subject", "detail")).casefold():
-                    continue
-                items.append({**event, "trace_id": row["trace_id"], "session_id": row["session_id"]})
-        items.sort(key=lambda item:(item["time_unix_nano"], item["source_id"]), reverse=True)
-        return items[:limit]
+            rows = db.execute(activity_sql + f"""SELECT s.trace_id,s.session_id,s.value,{stamp} AS stamp,{key} AS event_key
+                FROM activity s
+                {where} ORDER BY stamp DESC,event_key DESC LIMIT ?""", [*params, limit+1]).fetchall()
+        items = [{**json.loads(row['value']), 'id': row['event_key'],
+                  'trace_id': row['trace_id'], 'session_id': row['session_id']} for row in rows[:limit]]
+        next_cursor = self._next_event_cursor(rows[limit-1]['stamp'],rows[limit-1]['event_key']) if len(rows)>limit else None
+        return {'activity': items, 'next_cursor': next_cursor, 'scope': 'stored activity'}
 
     def mcp_calls(self, limit=100, service=None, session_id=None, query=None):
-        """Reported MCP operations, joining log evidence with its execution span."""
+        return self.mcp_page(limit, service, session_id, query)['calls']
+
+    def mcp_page(self, limit=100, service=None, session_id=None, query=None, cursor=None,
+                 include_reviews=True):
+        """Page complete MCP calls, keeping all evidence for each call together."""
         limit = max(1, min(200, int(limit)))
+        before = self._event_cursor(cursor)
         match = "(attributes LIKE '%\"mcp.%' OR attributes LIKE '%\"rpc.system\": \"mcp\"%')"
         clauses, params = [match], []
         if service:
@@ -905,10 +968,39 @@ class Store:
         if session_id:
             clauses.append("json_extract(attributes,'$.\"session.id\"')=?")
             params.append(session_id)
+        if not include_reviews:
+            clauses.append("service!='codex-review'")
         where = ' AND '.join(clauses)
+        span_key = "trace_id || ':' || span_id"
+        log_key = "CASE WHEN trace_id IS NOT NULL AND span_id IS NOT NULL THEN trace_id || ':' || span_id ELSE digest END"
+        def mcp_identity(alias):
+            return (f"COALESCE(json_extract({alias}.attributes,'$.\"mcp.server.name\"'),'Not reported')",
+                    f"COALESCE(json_extract({alias}.attributes,'$.\"mcp.tool.name\"'),"
+                    f"json_extract({alias}.attributes,'$.\"tool.name\"'),"
+                    f"json_extract({alias}.attributes,'$.\"agent.activity.action\"'),'Not reported')")
+        server,tool=mcp_identity('logs')
+        linked_server,linked_tool=mcp_identity('linked')
+        unique_log=f"""(span_id IS NOT NULL OR NOT EXISTS (
+            SELECT 1 FROM logs linked WHERE linked.trace_id=logs.trace_id
+            AND linked.time_ns=logs.time_ns AND linked.span_id IS NOT NULL
+            AND {linked_server}={server} AND {linked_tool}={tool}))"""
+        query_filter = ' HAVING MAX(instr(lower(evidence),lower(?)))>0' if query else ''
+        cursor_filter = ' WHERE (stamp,call_key) < (?,?)' if before else ''
+        values = [*params, *params, *([query] if query else []), *(before or ()), limit+1]
         with self._connect() as db:
-            spans = db.execute(f"SELECT * FROM spans WHERE {where} ORDER BY end_ns DESC LIMIT ?", [*params, limit*2]).fetchall()
-            logs = db.execute(f"SELECT * FROM logs WHERE {where} ORDER BY time_ns DESC LIMIT ?", [*params, limit*2]).fetchall()
+            candidates = db.execute(f"""WITH evidence AS (
+                SELECT {span_key} AS call_key,end_ns AS stamp,attributes || name || service AS evidence FROM spans WHERE {where}
+                UNION ALL
+                SELECT {log_key} AS call_key,time_ns AS stamp,attributes || body || service AS evidence FROM logs WHERE {where} AND {unique_log}
+            ), calls AS (
+                SELECT call_key,MAX(stamp) AS stamp FROM evidence GROUP BY call_key {query_filter}
+            ) SELECT * FROM calls {cursor_filter} ORDER BY stamp DESC,call_key DESC LIMIT ?""", values).fetchall()
+            selected_keys = [row['call_key'] for row in candidates[:limit]]
+            if not selected_keys:
+                return {'calls': [], 'next_cursor': None}
+            placeholders = ','.join('?' for _ in selected_keys)
+            spans = db.execute(f"SELECT * FROM spans WHERE {span_key} IN ({placeholders})",selected_keys).fetchall()
+            logs = db.execute(f"SELECT * FROM logs WHERE {log_key} IN ({placeholders}) ORDER BY time_ns DESC,digest DESC",selected_keys).fetchall()
         calls = {}
         for span in spans:
             attrs = json.loads(span['attributes'])
@@ -951,9 +1043,10 @@ class Store:
         items = sorted((item for item in calls.values() if item.get('span_id') or
                         (item['trace_id'],item['server'],item['tool'],item['time_unix_nano']) not in linked),
                        key=lambda item:item['time_unix_nano'], reverse=True)
-        if query:
-            items = [item for item in items if query.casefold() in ' '.join(str(item.get(key) or '') for key in ('server','tool','service','arguments','output')).casefold()]
-        return items[:limit]
+        by_id = {item['id']: item for item in items}
+        items = [by_id[key] for key in selected_keys if key in by_id]
+        next_cursor = self._next_event_cursor(candidates[limit-1]['stamp'],candidates[limit-1]['call_key']) if len(candidates)>limit else None
+        return {'calls': items, 'next_cursor': next_cursor}
 
     def ingest_metrics(self, points):
         rows = []
@@ -1320,7 +1413,7 @@ class Store:
                 for (target, direction), edges in sorted(relations.items())]
 
     def trace_page(self, limit=100, service=None, status=None, cursor=None, session_id=None,
-                   search=None, endpoint_id=None):
+                   search=None, endpoint_id=None, include_reviews=True):
         if not 1 <= int(limit) <= 500:
             raise ValueError("limit must be between 1 and 500")
         if session_id is not None:
@@ -1389,6 +1482,8 @@ class Store:
                 if session_id is not None and summary.get("session_id") != session_id:
                     continue
                 if service and service not in summary["services"]:
+                    continue
+                if not include_reviews and 'codex-review' in summary['services']:
                     continue
                 if status and summary["status"] != status:
                     continue

@@ -1,6 +1,7 @@
 """Agent-first terminal UI. Raw evidence lives in scrollable inspectors."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
@@ -11,17 +12,17 @@ import time
 import webbrowser
 from pathlib import Path
 
-from rich.cells import get_character_cell_size
+from rich.cells import cell_len, get_character_cell_size
 from rich.segment import Segment
-from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
+from textual.strip import Strip
 from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
@@ -224,7 +225,7 @@ def copy_event_text(item):
     return '\n'.join(lines)
 
 
-def write_system_clipboard(text):
+async def write_system_clipboard(text):
     """Write to the desktop clipboard when a native clipboard tool is available."""
     candidates=[]
     if sys.platform=='darwin' and shutil.which('pbcopy'):
@@ -240,10 +241,22 @@ def write_system_clipboard(text):
             candidates.append((['xsel','--clipboard','--input'],'X11'))
     for command,label in candidates:
         try:
-            result=subprocess.run(command,input=text,text=True,capture_output=True,timeout=3,check=False)
-        except (OSError,subprocess.TimeoutExpired):
+            # Clipboard owners such as xclip fork a background process. Captured
+            # pipes can stay open in that child even after the command succeeds.
+            process=await asyncio.create_subprocess_exec(*command,stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        except OSError:
             continue
-        if result.returncode==0:
+        try:
+            await asyncio.wait_for(process.communicate(text.encode('utf-8')),timeout=3)
+        except (asyncio.TimeoutError,asyncio.CancelledError) as exc:
+            if process.returncode is None:
+                try:process.kill()
+                except ProcessLookupError:pass
+            await process.wait()
+            if isinstance(exc,asyncio.CancelledError):raise
+            continue
+        if process.returncode==0:
             return label
     return None
 
@@ -354,34 +367,60 @@ class ResultsTable(DataTable):
         self.scroll_to(x=0,y=scroll.y,animate=False)
 
 
+class SearchInput(Input):
+    """Use familiar select-all behavior in dashboard search fields."""
+    BINDINGS=[Binding('ctrl+a','select_all','Select all',show=False)]
+
+
 class SelectableRichLog(RichLog):
-    """Expose RichLog's rendered lines to Textual's pointer text selection."""
+    """Selectable evidence with visible highlighting and plain-text extraction."""
     def render_line(self,y):
-        strip=super().render_line(y)
         source_y=self.scroll_offset.y+y
-        source_x=self.scroll_offset.x
-        prefix_chars=0
-        prefix_cells=0
-        if source_x and source_y<len(self.lines):
-            for segment in self.lines[source_y]:
-                for character in segment.text:
-                    width=get_character_cell_size(character)
-                    if prefix_cells+width>source_x:break
-                    prefix_cells+=width
-                    prefix_chars+=1
-                if prefix_cells>=source_x:break
-        segments=[]
-        char_offset=prefix_chars
-        for segment in strip:
-            style=(segment.style or Style.null())+Style(meta={'offset':(char_offset,source_y)})
-            segments.append(Segment(segment.text,style))
-            char_offset+=len(segment.text)
-        return type(strip)(segments,strip.cell_length)
+        width=self.scrollable_content_region.width
+        if source_y>=len(self.lines):
+            # Map empty space to the end, so dragging below the text is safe.
+            last=len(self.lines)-1
+            return Strip.blank(width,self.rich_style).apply_offsets(
+                len(self.lines[last].text) if last>=0 else 0,max(0,last))
+        line=self.lines[source_y].apply_style(self.rich_style)
+        selection=self.text_selection
+        span=selection.get_span(source_y) if selection else None
+        if span:
+            start,end=span
+            text=line.text
+            start=cell_len(text[:start])
+            end=line.cell_length if end==-1 else cell_len(text[:end])
+            if end>start:
+                selected=line.crop(start,end)
+                highlight=self.screen.get_component_rich_style('screen--selection')
+                selected=Strip(Segment.apply_style(selected,post_style=highlight),selected.cell_length)
+                line=Strip.join([line.crop(0,start),selected,line.crop(end)])
+        cells=characters=0
+        for character in line.text:
+            if cells>=self.scroll_offset.x:break
+            cells+=get_character_cell_size(character)
+            characters+=1
+        return line.crop_extend(self.scroll_offset.x,self.scroll_offset.x+width,self.rich_style).apply_offsets(characters,source_y)
+
+    @property
+    def plain_text(self):
+        return '\n'.join(line.text.rstrip() for line in self.lines)
 
     def get_selection(self,selection):
         if not self.lines:return None
-        text='\n'.join(line.render(self.app.console) for line in self.lines)
-        return selection.extract(text),'\n'
+        selected=[]
+        for y,line in enumerate(self.lines):
+            span=selection.get_span(y)
+            if span is not None:
+                start,end=span
+                selected.append(line.text[start:None if end==-1 else end].rstrip())
+        return '\n'.join(selected),'\n'
+
+    def clear(self):
+        # A selection from a previous event must never copy the next event.
+        if self.is_mounted and self in self.screen.selections:
+            self.screen.clear_selection()
+        return super().clear()
 
 
 class ObservatoryScreen(Screen):
@@ -391,12 +430,7 @@ class ObservatoryScreen(Screen):
         if selected is None:
             self.app.notify('Drag across text to select it, then press Ctrl+C.')
             return
-        method=write_system_clipboard(selected)
-        if method:
-            self.app.notify(f'Selected text copied to {method} clipboard.')
-        else:
-            self.app.copy_to_clipboard(selected)
-            self.app.notify('Sent copy request to terminal. Clipboard support depends on your terminal.')
+        self.app.copy_to_clipboard(selected)
 
 
 class ObservatoryApp(App):
@@ -404,6 +438,7 @@ class ObservatoryApp(App):
     AUTO_FOCUS='#agent-table'
     CSS='''
     Screen { background: #0d1117; color: #dce4ed; }
+    Screen > .screen--selection { background: #315a73; color: #ffffff; }
     * { scrollbar-color: #405566; scrollbar-color-hover: #6b8995; scrollbar-color-active: #6ee7c2; scrollbar-background: #101720; scrollbar-background-hover: #101720; scrollbar-background-active: #101720; }
     #masthead { height: 2; padding: 0 2; align-vertical: middle; }
     #brand { width: 1fr; color: #e6edf3; text-style: bold; text-wrap: nowrap; }
@@ -443,10 +478,16 @@ class ObservatoryApp(App):
     .view-search:focus { border: tall #6ee7c2; background-tint: transparent; }
     Input > .input--placeholder { color: #8b9bb0; }
     Input > .input--cursor { background: #6ee7c2; color: #0d1117; }
+    Input > .input--selection { background: #315a73; color: #ffffff; }
     .clear-search { width: 9; }
     .error-filter { width: 12; margin-right: 1; }
     .error-filter.-on { color: #ff8b92; border: tall #ff8b92; background: #2d2028; }
     .search-status { height: 1; color: #8b9bb0; padding: 0 1; }
+    .history-controls { height: 1; margin-top: 1; }
+    .history-controls Static { width: 1fr; color: #8b9bb0; }
+    .history-controls Button { min-width: 8; width: auto; height: 1; margin-left: 1; border: none; }
+    .history-controls Button:focus { background: #203d47; color: #ffffff; }
+    #history-back { width: 10; margin-right: 1; }
     DataTable { background: #101720; height: 1fr; scrollbar-size: 1 1; }
     DataTable:focus { background-tint: transparent; }
     DataTable > .datatable--header { background: #1a2533; color: #a4b7cb; text-style: bold; }
@@ -505,7 +546,9 @@ class ObservatoryApp(App):
     .inspecting #summary, .inspecting #controls { display: none; }
     '''
     BINDINGS=[Binding('/','search','Search'),Binding('e','expand','Expand'),Binding('t','open_trace','Trace'),
-              Binding('c','copy','Copy event'),
+              Binding('c','copy','Copy'), Binding('alt+left','history_back','Back',show=False),
+              Binding('[','history("newer")','Newer',show=False),Binding(']','history("older")','Older',show=False),
+              Binding('l','history("latest")','Latest',show=False),
               Binding('p','pause','Pause'),Binding('a','all','Reset',show=False),Binding('v','reviews','Reviews',show=False),
               Binding('b','browser','Web'),Binding('q','quit','Quit'),Binding('escape','back','Back',show=False),
               Binding('s','focus_agent','Focus agent',show=False),Binding('1','page("agents")','Agents',show=False),
@@ -530,17 +573,25 @@ class ObservatoryApp(App):
         self.refresh_timer=None
         self.search_queries={page:'' for page in ('agents','activity','mcp','traces','host')}
         self.errors_only=set()
+        self.navigation_history=[]
 
     def results(self,page,table,placeholder,classes=''):
         """Keep a view's filter, result count, and rows in one panel."""
-        controls=[Input(placeholder=placeholder,id='search-'+page,classes='view-search')]
+        controls=[SearchInput(placeholder=placeholder,id='search-'+page,classes='view-search')]
         if page in {'activity','mcp'}:
             controls.append(Button('Errors',id='errors-'+page,classes='error-filter',tooltip='Show only failed calls in the current results'))
         controls.append(Button('Clear',id='clear-'+page,classes='clear-search',disabled=True))
+        footer=[]
+        if page in {'activity','mcp','traces'}:
+            footer=[Horizontal(Static('Latest',id='history-label-'+page),
+                Button('Newer',id='newer-'+page,compact=True,disabled=True),
+                Button('Older',id='older-'+page,compact=True,disabled=True),
+                Button('Latest',id='latest-'+page,compact=True,disabled=True),classes='history-controls')]
         return Vertical(
             Horizontal(*controls,classes='searchbar'),
             Static('Loading…',id='mcp-hint' if page=='mcp' else 'search-status-'+page,classes='search-status',markup=False),
             ResultsTable(id=table,cursor_type='row',zebra_stripes=True),
+            *footer,
             id='results-'+page,classes='box results '+classes)
 
     def compose(self)->ComposeResult:
@@ -551,6 +602,7 @@ class ObservatoryApp(App):
             for name in ('sessions','processes','mcp-count','usage'):
                 yield Static('',id='stat-'+name,classes='stat',markup=False)
         with Horizontal(id='controls'):
+            yield Button('← Back',id='history-back',disabled=True,tooltip='Return to the event you opened · Alt+Left')
             yield Static('Scope',id='scope-label')
             yield Select([('All agent sessions','all')],value='all',allow_blank=False,id='scope')
             yield Static('',id='controls-spacer')
@@ -618,6 +670,8 @@ class ObservatoryApp(App):
             self.query_one('#search-'+page).tooltip='Search this view · / to focus · Esc to return'
         self.query_one('#reviews').tooltip='Include internal approval review sessions'
         self.query_one('#pause').tooltip='Pause display updates · collection continues'
+        for log in self.query(SelectableRichLog):
+            log.tooltip='Drag to select text · Ctrl+C copies selection · c copies details'
         self.query_one('#host-detail').styles.height=8
         self.update_layout()
         if not self.feed.thread.is_alive():self.feed.thread.start()
@@ -633,12 +687,18 @@ class ObservatoryApp(App):
         self.call_after_refresh(self.reflow_inspectors)
 
     def reflow_inspectors(self):
+        self.screen.clear_selection()
+        positions={log.id:log.scroll_offset for log in self.query(SelectableRichLog)}
         self.inspector_signatures.clear()
         self.last_update=-1
         self.refresh_data()
         trees=self.query('#span-tree')
         if trees and trees.first().cursor_node:
             self.show_span(trees.first().cursor_node.data)
+        def restore():
+            for name,position in positions.items():
+                self.query_one('#'+name).scroll_to(x=position.x,y=position.y,animate=False)
+        self.call_after_refresh(restore)
 
     def update_layout(self,size=None):
         size=size or self.size
@@ -664,12 +724,18 @@ class ObservatoryApp(App):
                 if not selected:selected=table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
             except Exception:pass
         scroll=table.scroll_offset
-        table.clear()
-        for key,values,record in rows:table.add_row(*values,key=key)
-        if rows:
-            index=next((index for index,(key,_,__) in enumerate(rows) if key==selected),0)
-            table.move_cursor(row=index,scroll=False)
-            table.scroll_to(x=scroll.x,y=scroll.y,animate=False)
+        old_index=table.cursor_row
+        with table.prevent(DataTable.RowHighlighted):
+            if [key.value for key in table.rows]==[key for key,_,_ in rows]:
+                for key,values,_ in rows:
+                    for column,value in zip(table.columns,values):table.update_cell(key,column,value)
+            else:
+                table.clear()
+                for key,values,record in rows:table.add_row(*values,key=key)
+            if rows:
+                index=next((index for index,(key,_,__) in enumerate(rows) if key==selected),0)
+                table.move_cursor(row=index,scroll=False)
+                table.scroll_to(x=scroll.x,y=max(0,scroll.y+index-old_index),animate=False)
 
     def search_status(self,page,count,noun,plural=None):
         query=self.search_queries[page]
@@ -698,6 +764,9 @@ class ObservatoryApp(App):
             f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}",
             style='#8b9bb0')
         self.query_one('#health',Static).update(health)
+        if self.screen.selections:
+            self.query_one('#health',Static).update('Text selected · Ctrl+C to copy · click to clear selection and resume display updates')
+            return
         if data.updated==self.last_update:return
         self.last_update=data.updated;self.data=data
         if self.agent:
@@ -736,12 +805,14 @@ class ObservatoryApp(App):
         if self.selected_source not in {item['id'] for item in visible_agents}:self.selected_source=visible_agents[0]['id'] if visible_agents else None
         self.show_agent()
         activity_items=self.visible_results('activity',data.activity_results if data.activity_results is not None else data.activity)
-        activity=[(item['source_id'],[cell(time.strftime('%H:%M:%S',time.localtime(item['time_unix_nano']/1e9))),cell(item['domain'].upper(),'#92b9eb'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
+        activity_items=self.hold_selected('activity',activity_items,self.selected_activity,'source_id')
+        activity=[(item.get('id') or item['source_id'],[cell(table_when(item['time_unix_nano'])),cell(item['domain'].upper(),'#92b9eb'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
         self.fill('activity-table',activity)
         self.search_status('activity',len(activity),'event')
         if self.selected_activity not in self.table_data.get('activity-table',{}):self.selected_activity=activity[0][0] if activity else None
         self.show_activity()
         mcp_items=self.visible_results('mcp',data.mcp_results if data.mcp_results is not None else data.mcp)
+        mcp_items=self.hold_selected('mcp',mcp_items,self.selected_mcp,'id')
         self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano']),'#8b9bb0'),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server'],'#a4b7cb'),cell(item['tool']),status(item['status']),cell('—' if item['duration_ms'] is None else timing(item['duration_ms']))],item) for item in mcp_items])
         if self.selected_mcp not in self.table_data.get('mcp-table',{}):self.selected_mcp=mcp_items[0]['id'] if mcp_items else None
         self.show_mcp()
@@ -764,6 +835,14 @@ class ObservatoryApp(App):
         if self.feed.pinned_trace and detail.get('summary') and not any(item['trace_id']==detail['trace_id'] for item in traces):traces.insert(0,detail['summary'])
         self.fill('trace-table',[(item['trace_id'],[cell('Active · errors','yellow') if item.get('active') and item['status']=='ERROR' else cell('Error','red') if item['status']=='ERROR' else status(item['status']),cell(trace_name(item)),cell(item['span_count']),cell(number(item['input_tokens'])+' / '+number(item['output_tokens']))],item) for item in traces],preserve=self.feed.selected_trace)
         self.search_status('traces',len(traces),'trace')
+        for page in ('activity','mcp','traces'):
+            paging=data.pagination.get(page,{})
+            page_number=paging.get('page',1)
+            self.query_one('#history-label-'+page,Static).update('Latest' if page_number==1 else f'History · page {page_number}')
+            self.query_one('#older-'+page,Button).disabled=not paging.get('next_cursor')
+            self.query_one('#newer-'+page,Button).disabled=page_number==1
+            self.query_one('#latest-'+page,Button).disabled=page_number==1
+            self.query_one('#older-'+page).tooltip='Load older saved records · ]' if paging.get('supported') else 'Restart the updated receiver to enable history paging'
         self.show_spans()
         host_query=self.search_queries['host'].casefold()
         visible_processes=[item for item in processes if not host_query or host_query in ' '.join(str(item.get(key) or '') for key in ('name','pid','parent_pid','project','state')).casefold()]
@@ -779,6 +858,13 @@ class ObservatoryApp(App):
     def scope_label(self):
         item=getattr(self,'source_map',{}).get(self.scope_value)
         return f"{item['runtime']} / {item.get('project') or 'SDK'}" if item else 'all agent sessions'
+
+    def hold_selected(self,page,items,selected,key):
+        """Keep the event being read when new arrivals push it off the live page."""
+        current=self.table_data.get(page+'-table',{}).get(selected)
+        if current and selected not in {item.get('id') or item[key] for item in items}:
+            return [*items,current]
+        return items
 
     def inspect(self,name,title,fields,sections):
         signature=(title,str(fields),str(sections))
@@ -883,7 +969,7 @@ class ObservatoryApp(App):
         actions=[event for event in self.data.activity if event.get('session_id')==item.get('session_id')] if item.get('session_id') else [event for event in self.data.activity if event.get('service')==item.get('service')]
         meaningful=[event for event in actions if event.get('domain') in {'shell','file','mcp','browser','model','message'}]
         actions=sorted(meaningful or actions,key=lambda event:event.get('time_unix_nano',0),reverse=True)
-        self.fill('agent-actions',[(event['source_id'],[cell(time.strftime('%H:%M:%S',time.localtime(event['time_unix_nano']/1e9))),cell(event['domain'].upper()),cell(headline(event))],event) for event in actions[:30]])
+        self.fill('agent-actions',[(event.get('id') or event['source_id'],[cell(table_when(event['time_unix_nano'])),cell(event['domain'].upper()),cell(headline(event))],event) for event in actions[:30]])
 
     def show_activity(self):
         item=self.table_data.get('activity-table',{}).get(self.selected_activity)
@@ -979,12 +1065,12 @@ class ObservatoryApp(App):
         if not item:return
         name=event.data_table.id
         if name=='agent-table':self.selected_source=item['id'];self.show_agent()
-        elif name=='activity-table':self.selected_activity=item['source_id'];self.show_activity()
+        elif name=='activity-table':self.selected_activity=event.row_key.value;self.show_activity()
         elif name=='mcp-table':self.selected_mcp=item['id'];self.show_mcp()
         elif name=='trace-table':
             if self.feed.pinned_trace and self.data.detail.get('trace_id')!=self.feed.selected_trace:return
             if self.feed.selected_trace!=item['trace_id']:
-                self.feed.selected_trace=item['trace_id'];self.feed.pinned_trace=False;self.feed.request_refresh()
+                self.feed.selected_trace=item['trace_id'];self.feed.pinned_trace=True;self.feed.request_refresh()
                 self.feed.selected_span_id=None
                 self.query_one('#span-tree',Tree).root.set_label(Text('Loading selected trace…'))
 
@@ -998,7 +1084,7 @@ class ObservatoryApp(App):
         if event.data_table.id=='agent-table':
             self.selected_source=item['id'];self.show_agent();self.query_one('#agent-detail',RichLog).focus()
         elif event.data_table.id=='agent-actions':
-            self.selected_activity=item['source_id'];self.action_page('activity');self.show_activity()
+            self.selected_activity=item.get('id') or item['source_id'];self.action_page('activity');self.show_activity()
         elif event.data_table.id=='activity-table':self.query_one('#activity-detail',RichLog).focus()
         elif event.data_table.id=='mcp-table':self.query_one('#mcp-detail',RichLog).focus()
         elif event.data_table.id=='trace-table':self.query_one('#span-tree',Tree).focus()
@@ -1018,6 +1104,7 @@ class ObservatoryApp(App):
     def scope_changed(self,event):
         if event.value==Select.BLANK or event.value==self.scope_value:return
         self.scope_value=str(event.value);item=getattr(self,'source_map',{}).get(self.scope_value)
+        self.selected_activity=self.selected_mcp=None
         self.feed.session_id=item.get('session_id') or '' if item else ''
         self.feed.service=item.get('service') or '' if item else ''
         self.feed.selected_trace=None;self.feed.pinned_trace=False;self.feed.request_refresh()
@@ -1031,6 +1118,8 @@ class ObservatoryApp(App):
         self.query_one('#clear-'+page,Button).disabled=not event.value
         if self.search_queries[page]==value:return
         self.search_queries[page]=value
+        if page=='activity':self.selected_activity=None
+        if page=='mcp':self.selected_mcp=None
         if page in self.search_timers:self.search_timers.pop(page).stop()
         def apply():
             if not self.query('#health'):return
@@ -1047,20 +1136,26 @@ class ObservatoryApp(App):
 
     @on(Checkbox.Changed,'#reviews')
     def reviews_changed(self,event):
+        self.selected_activity=self.selected_mcp=None
         self.feed.include_reviews=event.value;self.feed.selected_trace=None;self.feed.pinned_trace=False;self.feed.request_refresh()
         self.feed.selected_span_id=None
 
     @on(TabbedContent.TabActivated,'#pages')
     def page_activated(self,event):
         self.screen.set_class(event.pane.has_class('expanded'),'inspecting')
-        self.call_after_refresh(self.reflow_inspectors)
 
     @on(Button.Pressed)
     def button_pressed(self,event):
         if event.button.id=='pause':self.action_pause()
+        elif event.button.id=='history-back':self.action_history_back()
+        elif event.button.id.startswith(('older-','newer-','latest-')):
+            direction,page=event.button.id.split('-',1)
+            self.action_history(direction,page)
         elif event.button.id.startswith('expand-'):self.action_expand()
         elif event.button.id.startswith('errors-'):
             page=event.button.id.removeprefix('errors-')
+            if page=='activity':self.selected_activity=None
+            if page=='mcp':self.selected_mcp=None
             if page in self.errors_only:self.errors_only.remove(page)
             else:self.errors_only.add(page)
             event.button.set_class(page in self.errors_only,'-on')
@@ -1082,23 +1177,77 @@ class ObservatoryApp(App):
             self.collapse(page)
             self.query_one('#search-'+page,Input).focus()
     def action_back(self):
-        self.action_page(self.query_one('#pages',TabbedContent).active)
+        if self.screen.selections:
+            self.screen.clear_selection();return
+        page=self.query_one('#pages',TabbedContent).active
+        if isinstance(self.focused,Input) or self.query_one('#'+page).has_class('expanded'):
+            self.action_page(page)
+        elif self.navigation_history:
+            self.action_history_back()
+        else:self.action_page(page)
+
+    def remember_location(self):
+        page=self.query_one('#pages',TabbedContent).active
+        self.navigation_history.append({'page':page,'expanded':self.query_one('#'+page).has_class('expanded'),
+            'focus':self.focused.id if self.focused else None,
+            'scroll':{widget.id:widget.scroll_offset for widget in self.query('#'+page+' RichLog, #'+page+' DataTable')}})
+        self.query_one('#history-back',Button).disabled=False
+
+    def action_history_back(self):
+        if not self.navigation_history:return
+        location=self.navigation_history.pop()
+        self.action_page(location['page'])
+        if location['expanded']:self.action_expand()
+        def restore():
+            if location['focus']:self.query_one('#'+location['focus']).focus()
+            for name,position in location['scroll'].items():
+                self.query_one('#'+name).scroll_to(x=position.x,y=position.y,animate=False)
+        self.call_after_refresh(restore)
+        self.query_one('#history-back',Button).disabled=not self.navigation_history
+
+    def action_history(self,direction,page=None):
+        page=page or self.query_one('#pages',TabbedContent).active
+        if page not in self.feed.history:return
+        self.screen.clear_selection()
+        old=self.selected_activity,self.selected_mcp
+        if page=='activity':self.selected_activity=None
+        if page=='mcp':self.selected_mcp=None
+        if not self.feed.navigate_history(page,direction):
+            self.selected_activity,self.selected_mcp=old
+            return
+        self.last_update=-1;self.refresh_data()
+
+    def copy_to_clipboard(self,text):
+        """Route all copy actions, including search inputs, to the OS clipboard."""
+        self._clipboard=text  # Keep Textual's in-app paste buffer in sync.
+        if text:self._copy_in_background(text)
+
+    @work(group='clipboard',exclusive=True)
+    async def _copy_in_background(self,text):
+        method=await write_system_clipboard(text)
+        if method:
+            self.notify(f'Copied to {method} clipboard.')
+        else:
+            super().copy_to_clipboard(text)
+            self.notify('Copy sent to terminal; clipboard support depends on your terminal.')
+
     def action_copy(self):
+        selected=self.screen.get_selected_text()
+        if selected:
+            self.copy_to_clipboard(selected);return
         page=self.query_one('#pages',TabbedContent).active
         if page=='mcp':
             item=self.table_data.get('mcp-table',{}).get(self.selected_mcp)
-        else:
+        elif page=='activity':
             item=self.table_data.get('activity-table',{}).get(self.selected_activity)
+        else:
+            name={'agents':'agent-detail','traces':'span-info','host':'host-detail','output':'agent-output'}[page]
+            self.copy_to_clipboard(self.query_one('#'+name,SelectableRichLog).plain_text)
+            return
         if not item:
             self.notify('Select an activity or MCP call to copy.')
             return
-        text=copy_event_text(item)
-        method=write_system_clipboard(text)
-        if method:
-            self.notify(f'Event copied to {method} clipboard.')
-        else:
-            self.copy_to_clipboard(text)
-            self.notify('Sent copy request to terminal. Clipboard support depends on your terminal.')
+        self.copy_to_clipboard(copy_event_text(item))
     def collapse(self,page):
         self.query_one('#'+page,TabPane).remove_class('expanded')
         self.screen.remove_class('inspecting')
@@ -1123,6 +1272,7 @@ class ObservatoryApp(App):
             self.action_page('activity')
     def action_reviews(self):self.query_one('#reviews',Checkbox).toggle()
     def action_all(self):
+        self.selected_activity=self.selected_mcp=None
         self.query_one('#scope',Select).value='all'
         self.errors_only.clear()
         for button in self.query('.error-filter'):
@@ -1131,6 +1281,7 @@ class ObservatoryApp(App):
         self.last_update=-1;self.refresh_data()
     def action_page(self,page):
         if page=='output' and not self.agent:return
+        self.screen.clear_selection()
         self.collapse(page)
         self.query_one('#pages',TabbedContent).active=page
         target={'agents':'agent-table','activity':'activity-table','mcp':'mcp-table','traces':'trace-table','host':'host-table','output':'agent-output'}[page]
@@ -1138,9 +1289,11 @@ class ObservatoryApp(App):
     def action_browser(self):webbrowser.open(self.feed.api.endpoint)
     def action_open_trace(self):
         page=self.query_one('#pages',TabbedContent).active
+        if page not in {'activity','mcp'}:return
         item=self.table_data.get('mcp-table',{}).get(self.selected_mcp) if page=='mcp' else self.table_data.get('activity-table',{}).get(self.selected_activity)
         if not item or not item.get('trace_id'):
             self.notify('This action has no linked trace.');return
+        self.remember_location()
         self.jump_span=item.get('span_id')
         self.feed.selected_span_id=self.jump_span
         self.feed.selected_trace=item['trace_id'];self.feed.pinned_trace=True;self.feed.request_refresh();self.action_page('traces')

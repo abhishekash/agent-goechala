@@ -47,7 +47,7 @@ These install the checkout as an isolated uv tool. Re-run the script after pulli
 - **Host:** known local agent processes and basic resource use, shown separately from sessions.
 - **Web dashboard:** searchable live activity with the same local receiver.
 
-The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list.
+The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading.
 
 The receiver stores data in a local SQLite file. Native session capture is bounded and redacts recognizable credentials on a best-effort basis. Choose metadata-only capture with `--metadata-only`. See [Privacy and capture boundaries](docs/privacy.md).
 

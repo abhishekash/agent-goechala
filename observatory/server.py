@@ -98,10 +98,13 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
             elif path == "/api/activity":
                 query = parse_qs(route.query)
                 try:
-                    items = store.recent_activity(limit=int(query.get("limit", [100])[0]),
+                    page = store.activity_page(limit=int(query.get("limit", [100])[0]),
                         service=query.get("service", [None])[0], domain=query.get("domain", [None])[0],
-                        query=query.get("q", [None])[0], session_id=query.get("session_id", [None])[0])
-                    self._json(200, {"activity": items, "scope": "latest 100 observed traces"})
+                        query=query.get("q", [None])[0], session_id=query.get("session_id", [None])[0],
+                        cursor=query.get("cursor", [None])[0],
+                        include_reviews=query.get("include_reviews", ["1"])[0]!="0",
+                        errors_only=query.get("errors_only", ["0"])[0]=="1")
+                    self._json(200, page)
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
             elif path == "/api/metrics":
@@ -109,10 +112,11 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
             elif path == "/api/mcp":
                 query = parse_qs(route.query)
                 try:
-                    calls = store.mcp_calls(limit=int(query.get('limit', [100])[0]),
+                    page = store.mcp_page(limit=int(query.get('limit', [100])[0]),
                         service=query.get('service', [None])[0], session_id=query.get('session_id', [None])[0],
-                        query=query.get('q', [None])[0])
-                    self._json(200, {'calls': calls, 'scope': 'latest reported MCP operations'})
+                        query=query.get('q', [None])[0], cursor=query.get('cursor', [None])[0],
+                        include_reviews=query.get('include_reviews', ['1'])[0]!='0')
+                    self._json(200, {**page, 'scope': 'stored MCP operations'})
                 except ValueError as exc:
                     self._json(400, {'error': str(exc)})
             elif path == "/api/usage-series":
@@ -187,7 +191,8 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                                             query.get("cursor", [None])[0],
                                             query.get("session_id", [None])[0],
                                             query.get("q", [None])[0],
-                                            query.get("endpoint_id", [None])[0])
+                                            query.get("endpoint_id", [None])[0],
+                                            query.get("include_reviews", ["1"])[0]!="0")
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                     return
