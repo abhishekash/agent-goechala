@@ -81,7 +81,7 @@ async def capture(output: Path):
     output.mkdir(parents=True, exist_ok=True)
     prepare_failure()
     app = ObservatoryApp(FakeFeed())
-    async with app.run_test(size=(150, 46)) as pilot:
+    async with app.run_test(size=(170, 46)) as pilot:
         await pilot.pause(0.4)
         app.query_one("#brand").update("◈  OBSERVATORY   /   SYNTHETIC CASE")
         for page in ("agents", "activity", "mcp", "traces"):
