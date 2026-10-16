@@ -1,7 +1,7 @@
 # Investigation video
 
-[Watch the 31-second video](../media/investigation-demo.mp4) or view its
-[poster](../media/investigation-demo-poster.png).
+[Get the full 31-second MP4](https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4)
+or view the [animated README preview](../media/investigation-demo-preview.gif).
 
 The recording shows the actual Agent Observatory terminal UI populated with a
 synthetic example. It contains no real prompts, repositories, or session logs.
@@ -30,6 +30,9 @@ uv run python scripts/capture_investigation_video.py --output /tmp/ao-capture
 uv run --with cairosvg --with pillow --with imageio-ffmpeg \
   python scripts/compose_investigation_video.py \
   --captures /tmp/ao-capture --output media/investigation-demo.mp4
+uv run --with imageio-ffmpeg python scripts/make_readme_preview.py \
+  --video media/investigation-demo.mp4 \
+  --output media/investigation-demo-preview.gif
 ```
 
 The capture script renders a fixed synthetic case in Textual's test driver.

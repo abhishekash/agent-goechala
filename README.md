@@ -12,10 +12,10 @@
 **See what your coding agents are doing, live.** Agent Observatory brings local Codex and Claude Code sessions together with OpenTelemetry from instrumented agents, so you can see which sessions are working or waiting, what they last did, which MCP tools they called, and where a trace failed. Browse it in a keyboard friendly terminal or a local web dashboard.
 
 <p align="center">
-  <a href="media/investigation-demo.mp4"><img src="media/investigation-demo-poster.png" alt="Watch a 31-second Agent Observatory investigation of a failed MCP call" width="960"></a>
+  <a href="https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4"><img src="media/investigation-demo-preview.gif" alt="Animated walkthrough: find an agent session, inspect a failed MCP response, and follow its trace" width="960"></a>
 </p>
 
-<p align="center"><em><a href="media/investigation-demo.mp4">Watch the 31-second investigation</a>: session → failed MCP call → linked trace. Actual terminal UI with synthetic data; no real prompts or files. <a href="docs/investigation-video.md">Transcript</a>.</em></p>
+<p align="center"><em>Animated preview above · <a href="https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4">Full 31-second 1080p MP4</a> · <a href="docs/investigation-video.md">Transcript</a>. Actual terminal UI with synthetic data; no real prompts or files.</em></p>
 
 ## Start in one command
 
