@@ -11,8 +11,6 @@ os.environ['TERM'] = 'xterm-256color'
 sys.path.insert(0, str(ROOT))
 from observatory.terminal import Snapshot
 from observatory.terminal_ui import ObservatoryApp
-import cairosvg
-from PIL import Image
 
 now = time.time_ns()
 trace_id = 'demotrace000000000000000000000001'
@@ -89,6 +87,8 @@ class FakeFeed:
 async def main():
     import argparse
     from io import BytesIO
+    import cairosvg
+    from PIL import Image
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshots',type=Path,help='Also write wide and compact preview PNGs')
     args=parser.parse_args()
