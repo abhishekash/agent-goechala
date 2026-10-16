@@ -9,7 +9,7 @@
 ![OpenTelemetry OTLP](https://img.shields.io/badge/OpenTelemetry-OTLP-425CC7?logo=opentelemetry&logoColor=white)
 ![Local first](https://img.shields.io/badge/data-local--first-2E8B57)
 
-**See what your agents are doing, live.** Agent Observatory watches local Codex and Claude Code sessions, receives OpenTelemetry from instrumented agents, and brings tasks, model calls, MCP tools, traces, tokens, errors, and host activity into one terminal cockpit and local web dashboard.
+**See what your coding agents are doing, live.** Agent Observatory brings local Codex and Claude Code sessions together with OpenTelemetry from instrumented agents, so you can see which sessions are working or waiting, what they last did, which MCP tools they called, and where a trace failed. Browse it in a keyboard friendly terminal or a local web dashboard.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/terminal-demo.gif" alt="Animated preview of the Agent Observatory terminal cockpit with agents, MCP calls, traces, and host processes" width="960">
@@ -38,14 +38,21 @@ The terminal cockpit discovers recent local Codex and Claude Code sessions autom
 
 ### Your first minute
 
-1. Open **Agents** to see sessions, projects, current tasks, and recent work.
-2. Open **Activity** or **MCP Calls**, select a row, and press **Enter** to inspect its recorded input and output. Press **e** for a wider view.
-3. Press **b** for the browser dashboard, or use **Older / Newer / Latest** to explore stored activity in the terminal.
+1. Open **Agents**. Each row shows the runtime, session ID, repository/project, observed status, last update, any reported wait, and current or last task. Select a session to see its model, usage, and recent work.
+2. Open **MCP Calls** to see servers with observed calls in the selected history scope. Select a server to filter its calls, or inspect a call for recorded arguments, result, duration, and linked trace.
+3. Open **Activity** or **Traces** to follow the work around a call. Select a row and press **Enter** to inspect it; press **e** for a wider view. Press **b** to open the local browser dashboard.
 
-No sessions yet? Start a local Codex or Claude Code session and perform a task.
-Other agent runtimes need [instrumentation or OTLP export](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md).
-Available details depend on what the agent records; unsupported clients and
-unrecorded calls do not appear automatically.
+No sessions yet? Start a local Codex or Claude Code session and perform a task. Observatory discovers supported local session records; it does not attach to every process or infer unrecorded actions. Other runtimes need [instrumentation or OTLP export](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md). The MCP view lists servers with recorded calls, not every server configured on your machine.
+
+```text
+Codex / Claude Code logs ─┐
+Instrumented agents ─────┼─> local receiver ─> terminal cockpit / web dashboard
+                         └─> local SQLite history
+```
+
+### Optional AI session summaries
+
+Summaries are **off by default** and run only when you request one. Configure a compatible Chat Completions endpoint, model, and API key, then use **AI summary** on a selected session. The request contains the task, project, reported state, waiting reason, and recent action headlines; it excludes raw tool payloads, working directories, and hidden reasoning. Headlines can still contain private project details, so review the [data sent and provider setup](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md#optional-ai-summaries) before enabling it.
 
 Already cloned the repository? Run the installer for your shell:
 
@@ -61,16 +68,16 @@ These install the checkout as an isolated uv tool. Re-run the script after pulli
 
 ## What you get
 
-- **Agents:** distinct sessions, project, current task, model, recent actions, and activity state.
+- **Agents:** one row per discovered session, with session ID, project, observed status, update age, reported wait, and task/details.
 - **Activity:** readable user/assistant messages, shell commands, file changes, browser events, model use, and tool results.
-- **MCP:** server and tool calls with readable arguments and results, an Errors filter, latency, and direct links to the execution span.
+- **MCP:** observed server inventory and tool calls with readable arguments/results, errors, latency, and direct links to execution spans. Unobserved configured servers are not listed.
 - **Traces:** parent/child spans, model usage, errors, and evidence for each operation.
 - **Host:** known local agent processes and basic resource use, shown separately from sessions.
 - **Web dashboard:** searchable live activity with the same local receiver.
 
 The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading.
 
-The receiver stores data in a local SQLite file. Native session capture is bounded and redacts recognizable credentials on a best-effort basis. Choose metadata-only capture with `--metadata-only`. See [Privacy and capture boundaries](https://github.com/abhishekash/agent-observatory/blob/main/docs/privacy.md).
+The receiver stores data in a local SQLite file and listens on `127.0.0.1:14318`. Native session capture is bounded and redacts recognizable credentials on a best-effort basis. Choose metadata-only capture with `--metadata-only`. See [Privacy and capture boundaries](https://github.com/abhishekash/agent-observatory/blob/main/docs/privacy.md).
 
 ## Connect other agents
 
@@ -91,6 +98,8 @@ SpanHound reads JSONL and OTLP JSON files and can capture supported Python libra
 [Tell us about your first run](https://github.com/abhishekash/agent-observatory/issues/new?template=first_run.yml):
 which agent you use, what you expected to see, and what was missing or confusing.
 Share a redacted example when reporting a capture or formatting problem.
+
+If Agent Observatory helps with your workflow, a [GitHub star](https://github.com/abhishekash/agent-observatory) helps other agent developers find it. Issues with a clear reproduction and small fixes are especially welcome.
 
 ## Develop
 
