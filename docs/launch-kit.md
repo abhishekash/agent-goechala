@@ -18,6 +18,7 @@ on the producer's logs and instrumentation.
 
 - [Repository and first-minute guide](https://github.com/abhishekash/agent-observatory)
 - [Direct demo GIF](https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/terminal-demo.gif)
+- [Animated observability graphic](https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/observability-loop.gif) (illustrative trace)
 - [PyPI](https://pypi.org/project/agent-observatory-cli/)
 - [First-run feedback](https://github.com/abhishekash/agent-observatory/issues/new?template=first_run.yml)
 - [SpanHound: MCP trace investigation](https://github.com/abhishekash/spanhound)
