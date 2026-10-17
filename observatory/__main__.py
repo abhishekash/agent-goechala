@@ -58,6 +58,13 @@ def main():
     evaluations.add_argument("path", type=Path)
     prune = sub.add_parser("prune", help="delete telemetry older than the retention period")
     prune.add_argument("--older-than-days", type=float, required=True)
+    codex_control = sub.add_parser("codex-control", help="run a Codex turn with in-dashboard approvals")
+    codex_control.add_argument("--endpoint", default=None)
+    codex_control.add_argument("prompt", help="first prompt and session goal")
+    claude_control = sub.add_parser("claude-control", help="launch Claude Code with in-dashboard approvals")
+    claude_control.add_argument("--endpoint", default=None)
+    claude_control.add_argument("arguments", nargs=argparse.REMAINDER)
+    sub.add_parser("claude-hook", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.command in {None, "cockpit"}:
         from .terminal import CockpitError, run_cockpit
@@ -91,6 +98,22 @@ def main():
                     except (ValueError, KeyError, TypeError) as exc:
                         parser.error(f"{args.path}:{number}: {exc}")
         print(f"Imported {Store(args.db).ingest(spans)} spans")
+    elif args.command == "codex-control":
+        from .controlled import CodexBridge
+        try:
+            raise SystemExit(CodexBridge(args.prompt, base=args.endpoint).run())
+        except (ValueError, KeyError, OSError) as exc:
+            parser.exit(2, f"Observatory: {exc}\n")
+    elif args.command == "claude-control":
+        from .controlled import launch_claude
+        try:
+            arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
+            raise SystemExit(launch_claude(arguments, base=args.endpoint))
+        except (ValueError, OSError) as exc:
+            parser.exit(2, f"Observatory: {exc}\n")
+    elif args.command == "claude-hook":
+        from .controlled import run_claude_hook
+        run_claude_hook()
     elif args.command == "import-evals":
         payload = json.loads(args.path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):

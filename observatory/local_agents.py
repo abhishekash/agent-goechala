@@ -71,6 +71,7 @@ class Session:
         self.calls = {}
         self.usage = {}
         self.tasks = {}
+        self.goal = ""
         self.tool_inputs = {}
         self.modern_usage = False
         self.last_total = None
@@ -205,6 +206,7 @@ class Session:
                 self.capture_details = False
                 self.service = "codex-review"
                 self.tasks.clear()
+                self.goal = ""
                 self.store.redact_internal_source(self.source_id)
             self.project = Path(payload["cwd"]).name if payload.get("cwd") else self.project
         elif kind == "token_usage_record":
@@ -322,6 +324,7 @@ class Session:
             self.calls.clear()
             self.usage.clear()
             self.tasks.clear()
+            self.goal = ""
             self.tool_inputs.clear()
             self.pending_tools.clear()
             self.run_state, self.waiting_for, self.state_since = "unknown", "", 0
@@ -485,6 +488,7 @@ class LocalAgents:
                               "run_state": session.run_state, "state_since_ns": session.state_since,
                               "waiting_for": session.waiting_for,
                               "task": "Approval review" if session.internal else (session.tasks.get(session.turn) or "")[:500],
+                              "goal": "" if session.internal else session.goal[:4000],
                               "capture_content": session.capture_details,
                               "last_activity": session.last_activity,
                               "bytes_read": session.offset} for session in sessions]}

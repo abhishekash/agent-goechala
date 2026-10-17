@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing", "mcp", "codex", "claude-code"]
+keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing", "mcp", "codex", "claude-code", "opencode"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -49,7 +49,7 @@ openai-agents = ["openai-agents>=0.1.0,<2"]
 agent-observatory = "observatory.__main__:main"
 
 [tool.setuptools.package-data]
-observatory = ["index.html", "setup.js", "setup.css", "activity.js", "activity.css"]
+observatory = ["index.html", "control.html", "setup.js", "setup.css", "activity.js", "activity.css"]
 
 [tool.setuptools.packages.find]
 include = ["observatory*"]
