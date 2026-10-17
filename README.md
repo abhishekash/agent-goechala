@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="media/logo.png" alt="Agent Observatory logo" width="640">
+</p>
+
 # Agent Observatory
 
 [![CI](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml)
