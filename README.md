@@ -114,6 +114,10 @@ uv tool install --editable .
 python -m unittest discover -s tests -v
 ```
 
+An [experimental Rust trace importer and receiver](rust/README.md) is available
+for testing the native ingestion path. The Python application remains the full
+dashboard and terminal UI.
+
 Contributions and bug reports are welcome. See [CONTRIBUTING.md](https://github.com/abhishekash/agent-observatory/blob/main/CONTRIBUTING.md) and [open an issue](https://github.com/abhishekash/agent-observatory/issues).
 
 Maintainers can follow the [PyPI publishing guide](https://github.com/abhishekash/agent-observatory/blob/main/docs/publishing.md) to release a version with Trusted Publishing.

@@ -1,0 +1,19 @@
+[package]
+name = "agent-observatory-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rust ingestion path for Agent Observatory"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde_json = "1"
+tiny_http = "0.12"
+flate2 = "1"
+sha2 = "0.10"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
