@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, build_opener, ProxyHandler
 
-from .ai_summary import SummaryConfig, generate_summary, summary_evidence
+from .ai_summary import SummaryError, generate_agent_summary, summary_evidence
 from .local_activity import safe
 
 
@@ -207,13 +207,15 @@ class OpenCode:
             status_type = status.get("type", "idle") if isinstance(status, dict) else "idle"
             updated = (item.get("time") or {}).get("updated", 0)
             pending = [request for request in attention if request["session_id"] == session_id]
-            result.append({"runtime": "OpenCode", "session_id": session_id,
-                           "project": _text(item.get("directory") or item.get("title") or "", 300),
-                           "task": _text(item.get("title") or "", 500), "goal": "",
-                           "state": "waiting" if pending else "running" if status_type in {"busy", "retry"} else "idle",
-                           "waiting_for": ", ".join(request["kind"] for request in pending),
-                           "updated_ns": int(updated or 0) * 1_000_000,
-                           "attention": pending, "can_reply": True})
+            session = {"runtime": "OpenCode", "session_id": session_id,
+                       "project": _text(item.get("directory") or item.get("title") or "", 300),
+                       "task": _text(item.get("title") or "", 500), "goal": "",
+                       "state": "waiting" if pending else "running" if status_type in {"busy", "retry"} else "idle",
+                       "waiting_for": ", ".join(request["kind"] for request in pending),
+                       "updated_ns": int(updated or 0) * 1_000_000,
+                       "attention": pending, "can_reply": True}
+            session["progress_summary"] = recorded_summary(session, [])
+            result.append(session)
         return {"sessions": result, "attention": attention, "error": ""}
 
     def detail(self, session_id):
@@ -312,12 +314,15 @@ def native_sessions(monitor, store):
         state = session.get("run_state") or "unknown"
         if state in {"running", "waiting"} and updated and time.time_ns() - updated > 35_000_000_000:
             state = "no updates"
-        result.append({"runtime": session.get("runtime"), "session_id": session.get("session_id"),
+        item = {"runtime": session.get("runtime"), "session_id": session.get("session_id"),
                        "project": session.get("project"), "task": session.get("task"),
-                       "goal": session.get("goal"), "state": state,
+                       "goal": session.get("goal"), "model": session.get("model"), "state": state,
                        "waiting_for": session.get("waiting_for") if state == "waiting" else "",
-                       "updated_ns": updated, "attention": [], "can_reply": False,
-                       "source_id": session.get("source_id")})
+                       "updated_ns": updated, "last_activity": session.get("last_activity"),
+                       "attention": [], "can_reply": False,
+                       "source_id": session.get("source_id")}
+        item["progress_summary"] = recorded_summary(item, [session.get("last_activity")] if session.get("last_activity") else [])
+        result.append(item)
     return result
 
 
@@ -335,4 +340,75 @@ def summarize(session, events):
         "state": session.get("state"), "waiting_for": session.get("waiting_for"),
         "stamp": session.get("updated_ns"), "session_id": session.get("session_id"),
         "service": session.get("service")}, [dict(event, session_id=session.get("session_id")) for event in events])
-    return generate_summary(SummaryConfig.from_env(), evidence)
+    try:
+        return generate_agent_summary(evidence, session.get("runtime"))
+    except SummaryError:
+        return recorded_summary(session, events)
+
+
+def recorded_summary(session, events):
+    """A no-setup progress brief made only from facts already recorded locally."""
+    evidence = summary_evidence({"runtime": session.get("runtime"), "project": session.get("project"),
+        "task": session.get("goal") or session.get("task"), "model": session.get("model"),
+        "state": session.get("state"), "waiting_for": session.get("waiting_for"),
+        "stamp": session.get("updated_ns"), "session_id": session.get("session_id"),
+        "service": session.get("service")}, [dict(event, session_id=session.get("session_id")) for event in events])
+    goal = evidence.get("task") or "Goal not captured"
+    states = {"running": "Working", "idle": "Idle", "waiting": "Waiting", "completed": "Completed",
+              "interrupted": "Interrupted", "no updates": "No recent updates"}
+    state = str(evidence.get("state") or "unknown").lower()
+    current = states.get(state, "Status unknown")
+    if state == "waiting" and evidence.get("waiting_for"):
+        current += " for " + evidence["waiting_for"]
+    recent = evidence.get("events") or []
+    latest = recent[0] if recent else {}
+    activity = "No recent activity recorded"
+    if latest:
+        action = latest.get("action") or latest.get("domain") or "update"
+        subject = latest.get("subject") or ""
+        activity = (action + (": " + subject if subject and subject.lower() != action.lower() else ""))[:500]
+    errors = [item for item in recent if str(item.get("result") or "").lower()
+              in {"error", "failed", "failure", "denied", "blocked"}]
+    issue = "None recorded"
+    if errors:
+        event = errors[0]
+        issue = ((event.get("action") or "Error") + ": " + (event.get("subject") or "failure recorded"))[:500]
+    if state == "completed":
+        remaining = "The runtime reports completion."
+    elif state == "interrupted":
+        remaining = "Unknown; the run was interrupted."
+    elif state == "waiting" and evidence.get("waiting_for"):
+        remaining = "Waiting for " + evidence["waiting_for"]
+    else:
+        remaining = "Not established by recorded activity; compare with the goal."
+    return (f"Goal: {goal}\nCurrent: {current}\nLatest: {activity}\n"
+            f"Errors: {issue}\nRemaining: {remaining}")[:6000]
+
+
+def fleet_summary(sessions):
+    """Summarize the visible fleet without sending session data to a provider."""
+    sessions = list(sessions or [])
+    if not sessions:
+        return "No agent sessions detected yet. Start agents from their usual terminals."
+    counts = {"working": 0, "waiting": 0, "completed": 0, "interrupted": 0, "other": 0}
+    for session in sessions:
+        state = str(session.get("state") or "unknown").lower()
+        category = "working" if state in {"working", "running", "active"} else state
+        counts[category if category in counts else "other"] += 1
+    overview = f"{len(sessions)} agents · {counts['working']} working · {counts['waiting']} waiting · {counts['completed']} completed"
+    waiting = [session for session in sessions if str(session.get("state") or "").lower() == "waiting"]
+    if waiting:
+        labels = [f"{item.get('runtime') or 'Agent'}: {item.get('project') or item.get('session_id') or 'session'}"
+                  for item in waiting[:3]]
+        overview += "\nNeeds attention: " + "; ".join(labels)
+    recent = []
+    for session in sorted(sessions, key=lambda item: int(item.get("updated_ns") or 0), reverse=True):
+        latest = session.get("last_activity") or {}
+        subject = latest.get("subject") or latest.get("action")
+        if subject:
+            recent.append(f"{session.get('runtime') or 'Agent'}: {str(subject)[:160]}")
+        if len(recent) == 3:
+            break
+    if recent:
+        overview += "\nLatest recorded work: " + "; ".join(recent)
+    return overview[:1800]

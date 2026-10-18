@@ -54,9 +54,9 @@ Instrumented agents ─────┼─> local receiver ─> terminal cockpit 
                          └─> local SQLite history
 ```
 
-### Optional AI session summaries
+### Progress summaries
 
-Summaries are **off by default** and run only when you request one. Configure a compatible Chat Completions endpoint, model, and API key, then use **AI summary** on a selected session. The request contains the task, project, reported state, waiting reason, and recent action headlines; it excludes raw tool payloads, working directories, and hidden reasoning. Headlines can still contain private project details, so review the [data sent and provider setup](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md#optional-ai-summaries) before enabling it.
+Summaries work with zero extra setup. When requested, Observatory reuses a signed-in Codex, Claude Code, or OpenCode CLI if available; otherwise it gives a local summary from recorded activity. AI summaries send the goal, reported state, waiting reason, and recent action headlines through that CLI, so they use its account and quota. Raw tool payloads, working directories, and hidden reasoning are excluded. See [summary privacy and optional provider settings](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md#progress-summaries).
 
 Already cloned the repository? Run the installer for your shell:
 
@@ -78,7 +78,7 @@ These install the checkout as an isolated uv tool. Re-run the script after pulli
 - **Traces:** parent/child spans, model usage, errors, and evidence for each operation.
 - **Host:** known local agent processes and basic resource use, shown separately from sessions.
 - **Web dashboard:** searchable live activity with the same local receiver.
-- **Control:** `agent-observatory` opens one terminal cockpit. Its Control tab starts Codex, Claude Code, or OpenCode from a first-prompt goal, shows live sessions and errors, and handles pending approvals and questions in place. Press **b** only when you want the browser dashboard. [Learn more](docs/usage.md#agent-session-overview).
+- **Control:** `agent-observatory` opens one terminal cockpit. Start agents from their usual terminals; the Control tab monitors every discovered session, shows progress summaries and errors, and handles pending approvals and questions in place. Press **b** only when you want the browser dashboard. [Learn more](docs/usage.md#agent-session-overview).
 
 The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading.
 

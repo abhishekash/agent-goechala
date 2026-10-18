@@ -19,9 +19,8 @@ from .metrics import normalize_otlp_metrics, decode_metric_request
 from .watch import start_watchers
 from .distribution import installer_info, package_archive
 from .control import (OpenCode, ControlBroker, ControlError, claude_hook_response,
-                      native_sessions, native_detail, summarize)
-from .controlled import SessionLauncher
-from .ai_summary import SummaryConfig, SummaryError
+                      fleet_summary, native_sessions, native_detail, recorded_summary, summarize)
+from .ai_summary import SummaryConfig, SummaryError, available_summary_cli
 
 UI = Path(__file__).with_name("index.html")
 CONTROL_UI = Path(__file__).with_name("control.html")
@@ -31,7 +30,6 @@ MAX_BODY = 8 * 1024 * 1024
 def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=None, opencode_url=None):
     opencode = OpenCode(url=opencode_url)
     broker = ControlBroker()
-    launcher = SessionLauncher(opencode, base=endpoint or "http://127.0.0.1:4318", cwd=os.getcwd())
     summary_lock = threading.Lock()
     summary_cache = {}
     class Handler(BaseHTTPRequestHandler):
@@ -117,12 +115,12 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                         SummaryConfig.from_env()
                         summary_enabled = True
                     except SummaryError:
-                        summary_enabled = False
-                    self._json(200, {"sessions": native + live["sessions"],
+                        summary_enabled = available_summary_cli()
+                    sessions = native + live["sessions"]
+                    self._json(200, {"sessions": sessions,
                                      "attention": connected + live["attention"], "opencode_error": live["error"],
-                                     "summary_enabled": summary_enabled,
-                                     "available_runtimes": self.launcher.available(),
-                                     "launches": self.launcher.list()})
+                                     "fleet_summary": fleet_summary(sessions),
+                                     "summary_enabled": summary_enabled})
                 except ControlError as exc:
                     self._json(502, {"error": str(exc)})
             elif path == "/api/control/session":
@@ -132,11 +130,28 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                     self._json(400, {"error": "invalid session ID"})
                 elif runtime == "OpenCode":
                     try:
-                        self._json(200, opencode.detail(session_id))
+                        live = opencode.snapshot()
+                        session = next((item for item in live["sessions"] if item["session_id"] == session_id), None)
+                        if session is None:
+                            self._json(404, {"error": "session no longer available"})
+                            return
+                        detail = opencode.detail(session_id)
+                        detail.update({"runtime": runtime, "session_id": session_id,
+                                       "updated_ns": session.get("updated_ns", 0),
+                                       "progress_summary": recorded_summary(session, detail.get("events", []))})
+                        self._json(200, detail)
                     except ControlError as exc:
                         self._json(502, {"error": str(exc)})
                 elif runtime in {"Codex", "Claude Code"}:
-                    self._json(200, native_detail(store, session_id))
+                    local = getattr(store, "local_agent_monitor", None)
+                    session = next((item for item in native_sessions(local, store)
+                                    if item["session_id"] == session_id and item["runtime"] == runtime), None)
+                    detail = native_detail(store, session_id)
+                    session = session or {"runtime": runtime, "session_id": session_id, "state": "unknown"}
+                    detail.update({"runtime": runtime, "session_id": session_id,
+                                   "updated_ns": session.get("updated_ns", 0),
+                                   "progress_summary": recorded_summary(session, detail.get("events", []))})
+                    self._json(200, detail)
                 else:
                     self._json(400, {"error": "unknown runtime"})
             elif path == "/api/control/decision":
@@ -169,7 +184,8 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                         query=query.get("q", [None])[0], session_id=query.get("session_id", [None])[0],
                         cursor=query.get("cursor", [None])[0],
                         include_reviews=query.get("include_reviews", ["1"])[0]!="0",
-                        errors_only=query.get("errors_only", ["0"])[0]=="1")
+                        errors_only=query.get("errors_only", ["0"])[0]=="1",
+                        action=query.get("action", [None])[0])
                     self._json(200, page)
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
@@ -356,11 +372,7 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                         self._json(415, {"error": "OTLP requires application/json or application/x-protobuf"})
                         return
                 body = json.loads(raw)
-                if route.path == "/api/control/launch":
-                    if not isinstance(body, dict):
-                        raise ValueError("invalid launch request")
-                    self._json(202, self.launcher.start(body.get("runtime"), body.get("prompt")))
-                elif route.path == "/api/control/reply":
+                if route.path == "/api/control/reply":
                     if not isinstance(body, dict):
                         raise ValueError("invalid reply")
                     runtime = body.get("runtime")
@@ -414,15 +426,21 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                     detail = opencode.detail(session_id) if live else native_detail(store, session_id)
                     session["goal"] = session.get("goal") or detail["goal"]
                     key = body["runtime"], session_id
+                    events = detail.get("events") or []
+                    latest_event_ns = max((int(event.get("time_unix_nano") or 0) for event in events), default=0)
+                    fingerprint = (int(session.get("updated_ns") or 0), session.get("state"),
+                                   session.get("waiting_for"), session.get("goal") or session.get("task"),
+                                   latest_event_ns, len(events))
                     with summary_lock:
                         cached = summary_cache.get(key)
-                        if cached and (cached["updated_ns"] == session.get("updated_ns", 0)
-                                       or time.time() - cached["created"] < 60):
+                        if cached and cached["fingerprint"] == fingerprint:
                             result = {"summary": cached["summary"], "updated_ns": cached["updated_ns"]}
                         else:
                             result = {"summary": summarize(session, detail["events"]),
                                       "updated_ns": session.get("updated_ns", 0)}
-                            summary_cache[key] = {**result, "created": time.time()}
+                            summary_cache[key] = {**result, "fingerprint": fingerprint}
+                            if len(summary_cache) > 100:
+                                summary_cache.pop(next(iter(summary_cache)))
                     self._json(200, result)
                 elif route.path == "/api/spans":
                     raw_spans = body if isinstance(body, list) else body.get("spans", [])
@@ -460,7 +478,6 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
             if not quiet and os.environ.get("OBSERVATORY_QUIET") != "1":
                 super().log_message(format, *args)
 
-    Handler.launcher = launcher
     return Handler
 
 
@@ -470,7 +487,6 @@ def serve(db_path="observatory.db", host="127.0.0.1", port=4318, token=None,
     if retention_days is not None:
         store.prune(retention_days)
     server = ThreadingHTTPServer((host, port), handler_for(store, token))
-    server.RequestHandlerClass.launcher.base = f"http://127.0.0.1:{server.server_port}"
     local = None
     if local_agents and host in {"127.0.0.1", "localhost", "::1"}:
         from .local_agents import LocalAgents

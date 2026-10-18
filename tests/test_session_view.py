@@ -8,6 +8,21 @@ from tests.test_terminal_search import ManualFeed
 
 
 class SessionViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_button_falls_back_to_local_activity_without_setup(self):
+        feed = ManualFeed()
+        app = ObservatoryApp(feed)
+        with patch.dict('os.environ', {}, clear=True), \
+             patch('observatory.ai_summary.shutil.which', return_value=None):
+            async with app.run_test(size=(160, 48)) as pilot:
+                await pilot.pause()
+                app.action_page('agents')
+                await pilot.pause()
+                await pilot.click('#agent-summary')
+                await app.workers.wait_for_complete()
+                item = app.source_map[app.selected_source]
+                self.assertIn(item['id'], app.ai_summaries)
+                self.assertTrue(app.ai_summaries[item['id']][1].startswith('Goal:'))
+
     async def test_columns_waiting_and_summary_are_bound_to_selected_session(self):
         feed = ManualFeed()
         entry = feed.snapshot.local_status['sessions'][0]

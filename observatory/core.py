@@ -888,11 +888,11 @@ class Store:
     def _next_event_cursor(stamp, key):
         return base64.urlsafe_b64encode(json.dumps([stamp, key]).encode()).decode().rstrip("=")
 
-    def recent_activity(self, limit=100, service=None, domain=None, query=None, session_id=None):
-        return self.activity_page(limit, service, domain, query, session_id)["activity"]
+    def recent_activity(self, limit=100, service=None, domain=None, query=None, session_id=None, action=None):
+        return self.activity_page(limit, service, domain, query, session_id, action=action)["activity"]
 
     def activity_page(self, limit=100, service=None, domain=None, query=None, session_id=None,
-                      cursor=None, include_reviews=True, errors_only=False):
+                      cursor=None, include_reviews=True, errors_only=False, action=None):
         """Browse saved activity, including logs older than the trace preview window."""
         limit = max(1, min(500, int(limit)))
         before = self._event_cursor(cursor)
@@ -903,6 +903,9 @@ class Store:
             if value:
                 conditions.append(expression + "=?")
                 params.append(value)
+        if action:
+            conditions.append("lower(json_extract(s.value,'$.action'))=?")
+            params.append(str(action).casefold())
         if not include_reviews:
             conditions.append("COALESCE(json_extract(s.value,'$.service'),'')!='codex-review'")
         if errors_only:

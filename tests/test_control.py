@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
-from observatory.control import ControlBroker, ControlError, OpenCode, claude_hook_response, native_detail
+from observatory.control import (ControlBroker, ControlError, OpenCode, claude_hook_response,
+                                 fleet_summary, native_detail, recorded_summary, summarize)
 from observatory.controlled import CodexBridge, SessionLauncher, claude_settings
 from observatory.core import Store
 from observatory.local_agents import Session
@@ -98,6 +99,33 @@ class OpenCodeTests(unittest.TestCase):
                 "parts": [{"type": "text", "text": "Build the control center"}]})])
 
 
+class LocalSummaryTests(unittest.TestCase):
+    def test_zero_setup_summary_reports_recorded_progress_and_errors(self):
+        session = {'runtime': 'Codex', 'session_id': 'thread-1', 'goal': 'Fix the tests',
+                   'state': 'running', 'updated_ns': 12}
+        events = [
+            {'session_id': 'thread-1', 'time_unix_nano': 2, 'domain': 'tool', 'action': 'pytest',
+             'subject': 'test_control.py', 'result': 'error'},
+            {'session_id': 'thread-1', 'time_unix_nano': 3, 'domain': 'tool', 'action': 'pytest',
+             'subject': 'retry', 'result': 'ok'},
+        ]
+        with patch.dict('os.environ', {}, clear=True), \
+             patch('observatory.ai_summary.shutil.which', return_value=None):
+            summary = summarize(session, events)
+        self.assertIn('Goal: Fix the tests', summary)
+        self.assertIn('Current: Working', summary)
+        self.assertIn('Errors: pytest: test_control.py', summary)
+        self.assertIn('Remaining: Not established', summary)
+
+    def test_idle_native_session_is_not_reported_as_unknown(self):
+        summary = recorded_summary({'runtime': 'OpenCode', 'state': 'idle'}, [])
+        self.assertIn('Current: Idle', summary)
+
+    def test_fleet_counts_runtime_running_state_as_working(self):
+        summary = fleet_summary([{'runtime': 'Codex', 'state': 'running'}])
+        self.assertIn('1 agents · 1 working · 0 waiting', summary)
+
+
 class NativeGoalTests(unittest.TestCase):
     def test_first_prompt_remains_goal_after_followup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -183,10 +211,7 @@ class ControlHTTPTests(unittest.TestCase):
                 return int(head.split()[1]), json.loads(payload) if payload else None
             self.assertEqual(request("/api/control", token=None)[0], 401)
             self.assertEqual(request("/api/control")[1]["sessions"], [])
-            handler.launcher.start = lambda runtime, prompt: {"runtime": runtime, "session_id": "session-one"}
-            launch_code, launch = request("/api/control/launch", {"runtime": "OpenCode", "prompt": "Fix the bug"})
-            self.assertEqual(launch_code, 202)
-            self.assertEqual(launch, {"runtime": "OpenCode", "session_id": "session-one"})
+            self.assertEqual(request("/api/control/launch", {"runtime": "OpenCode", "prompt": "Fix the bug"})[0], 404)
             self.assertEqual(request("/api/control/request", {"runtime": "Codex", "session_id": "thread-1",
                 "kind": "permission", "detail": {"permission": "shell"}}, origin="https://other.example")[0], 403)
             code, item = request("/api/control/request", {"runtime": "Codex", "session_id": "thread-1",

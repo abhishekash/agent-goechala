@@ -4,7 +4,7 @@ import unittest
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
-from textual.widgets import DataTable, Select, TextArea
+from textual.widgets import Button, DataTable, TextArea
 
 from observatory.terminal import Api
 from observatory.terminal_ui import ObservatoryApp
@@ -23,9 +23,7 @@ class ControlApi:
             'attention': [{'runtime': 'Codex', 'session_id': 'thread-1', 'id': 'request-1',
                            'kind': 'question' if questions else 'permission',
                            'detail': {'questions': [{'question': 'Which test?', 'options': [{'label': 'control'}]}]}
-                           if questions else {'permission': 'shell', 'metadata': {'command': 'pytest'}}}],
-            'available_runtimes': {'OpenCode': False, 'Codex': True, 'Claude Code': False},
-            'launches': []}
+                           if questions else {'permission': 'shell', 'metadata': {'command': 'pytest'}}}]}
 
     def get(self, path):
         route = urlsplit(path)
@@ -34,11 +32,14 @@ class ControlApi:
         if route.path == '/api/control/session':
             session_id = parse_qs(route.query)['id'][0]
             return {'session_id': session_id, 'goal': 'Fix the flaky test',
+                    'progress_summary': 'Goal: Fix the flaky test\nCurrent: Waiting for permission\nLatest: pytest',
                     'events': [{'domain': 'prompt', 'action': 'started', 'detail': 'Run the tests'}]}
         raise AssertionError(path)
 
     def post(self, path, body):
         self.posts.append((path, body))
+        if path == '/api/control/summary':
+            return {'summary': 'Done: test run\nCurrent: Reviewing failures\nRemaining: Confirm result'}
         return {'accepted': True}
 
 
@@ -69,9 +70,9 @@ class TerminalControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(app.query_one('#control-alert').display)
             self.assertTrue(app.query_one('#control-approve-once').display)
             await pilot.click('#control-approve-once')
-            await self.wait_until(pilot, lambda: bool(api.posts))
-            self.assertEqual(api.posts[0][0], '/api/control/reply')
-            self.assertEqual(api.posts[0][1]['decision'], 'accept')
+            await self.wait_until(pilot, lambda: any(path == '/api/control/reply' for path, _ in api.posts))
+            reply = next(body for path, body in api.posts if path == '/api/control/reply')
+            self.assertEqual(reply['decision'], 'accept')
 
     async def test_control_tab_sends_answer_to_agent_question(self):
         app, api = await self.launch_app(questions=True)
@@ -82,21 +83,19 @@ class TerminalControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(answer.display)
             answer.text = 'control'
             app.send_control_reply(answer=True)
-            await self.wait_until(pilot, lambda: bool(api.posts))
-            self.assertEqual(api.posts[0][1]['answers'], [['control']])
+            await self.wait_until(pilot, lambda: any(path == '/api/control/reply' for path, _ in api.posts))
+            reply = next(body for path, body in api.posts if path == '/api/control/reply')
+            self.assertEqual(reply['answers'], [['control']])
 
-    async def test_control_tab_starts_agent_from_first_prompt(self):
+    async def test_control_tab_is_monitor_only(self):
         app, api = await self.launch_app()
         api.snapshot['attention'] = []
         api.snapshot['sessions'] = []
         async with app.run_test(size=(140, 42)) as pilot:
-            await self.wait_until(pilot, lambda: app.query_one('#control-runtime', Select).value == 'Codex')
-            app.query_one('#control-runtime', Select).value = 'Codex'
-            app.query_one('#control-prompt', TextArea).text = 'Find and fix the flaky test.'
-            await pilot.click('#control-start')
-            await self.wait_until(pilot, lambda: bool(api.posts))
-            self.assertEqual(api.posts[0][0], '/api/control/launch')
-            self.assertEqual(api.posts[0][1], {'runtime': 'Codex', 'prompt': 'Find and fix the flaky test.'})
+            await pilot.pause(0.2)
+            self.assertEqual(list(app.query('#control-start')), [])
+            self.assertEqual(list(app.query('#control-launch')), [])
+            self.assertEqual(api.posts, [])
 
     async def test_control_tab_loads_goal_and_progress_for_selected_session(self):
         app, api = await self.launch_app()
@@ -105,6 +104,16 @@ class TerminalControlTests(unittest.IsolatedAsyncioTestCase):
             await self.wait_until(pilot, lambda: getattr(app,'control_session_detail',None) is not None)
             self.assertEqual(app.control_session_detail['session_id'], 'thread-1')
             self.assertTrue(app.query_one('#control-summary').display)
+            self.assertFalse(app.query_one('#control-requests').display)
+            self.assertFalse(app.query_one('#control-alert').display)
+            self.assertFalse(app.query_one('#control-alert').has_class('pulse'))
+            self.assertIn('Current: Waiting for permission', app.control_session_detail['progress_summary'])
+            self.assertGreaterEqual(app.query_one('#control-detail').region.height, 14)
+            await self.wait_until(pilot, lambda: any(path == '/api/control/summary' for path, _ in api.posts))
+            self.assertIn(('/api/control/summary', {'runtime': 'Codex', 'session_id': 'thread-1'}), api.posts)
+            await self.wait_until(pilot, lambda: app.control_generated_summary is not None)
+            self.assertIn('Done: test run', app.control_generated_summary[1])
+            self.assertEqual(str(app.query_one('#control-summary', Button).label), 'Refresh progress summary')
 
 
 class TerminalApiTests(unittest.TestCase):

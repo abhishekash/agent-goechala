@@ -17,7 +17,7 @@ agent-observatory
 
 If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install agent-observatory-cli`.
 
-The cockpit opens one tabbed terminal interface for Control, Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. Control starts installed runtimes from a first-prompt goal, lists sessions and pending requests, and handles approvals and answers. Agents shows session tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Press **b** to open the browser dashboard when you want it. From this checkout, `python3 -m observatory` also works without installation.
+The cockpit opens one tabbed terminal interface for Control, Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. Control monitors discovered sessions, summarizes recorded progress, lists pending requests, and handles approvals and answers. Start agents from their usual terminals; Observatory discovers them automatically. Agents shows session tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Press **b** to open the browser dashboard when you want it. From this checkout, `python3 -m observatory` also works without installation.
 
 ### Existing Codex and Claude Code agents
 
@@ -297,22 +297,22 @@ The offline LangGraph retrieval control was run and imported alongside the harne
 ## Agent session overview
 
 Run `agent-observatory`. It opens the terminal cockpit and starts a loopback OpenCode server
-when the OpenCode CLI is installed. In the **Control** tab, choose an available runtime,
-enter the first prompt, and press **Start agent**. That first prompt becomes the session goal.
-You can also keep launching agents from their usual terminals; Codex and Claude Code sessions
-are discovered from local records, and OpenCode sessions from the local server.
+when the OpenCode CLI is installed. Start agents from their usual terminals; the **Control**
+tab discovers sessions automatically and shows fleet and per-agent progress summaries.
+Codex and Claude Code sessions are discovered from local records, and OpenCode sessions from
+the local server.
 
 Select a session to inspect its goal, messages, tool activity, and recorded errors.
 New **Needs input** requests are highlighted in the Control tab; select one to approve or
-answer it there. Agents started from the Control tab have a live control channel; already-running Codex and
-Claude Code sessions are observed read-only and still need replies in their agent window.
-OpenCode sessions created through the Control tab are connected to the server started
-by Observatory. Set `OBSERVATORY_OPENCODE_URL` only when you already run a different local
+answer it there. Codex and Claude Code sessions are observed read-only and still need replies
+in their agent window. OpenCode sessions are connected to the server started by Observatory.
+Set `OBSERVATORY_OPENCODE_URL` only when you already run a different local
 OpenCode server; if it requires a password, set `OBSERVATORY_OPENCODE_PASSWORD` too.
 
-When a compatible summary provider is configured, selecting a session can generate an AI
-progress brief. Summaries separate done, current, and remaining work and label uncertainty.
-They remain off until you configure a provider as described below.
+Each discovered session shows a local progress brief based on its goal, status, latest
+activity, recorded errors, and known remaining work. Selecting a session also refreshes its
+AI brief through an available signed-in agent CLI; if none is available, the local brief
+stays visible. Use **Refresh progress summary** to request another update.
 
 Approvals affect agent actions, so review the shown command, file change, or tool input
 before choosing. A shared receiver should use its bearer token, TLS, and a trusted
@@ -340,33 +340,22 @@ completion records carry server/tool identity. Restart the receiver after upgrad
 to re-read discoverable local session files; the existing 24-hour discovery window
 and bounded file reading limits still apply.
 
-## Optional AI summaries
+## Progress summaries
 
-AI summaries are off until you configure a provider. In **Agents**, select a session
-and click **AI summary**. This sends its task, project, reported state, waiting reason,
-and up to 30 recent action headlines to your chosen provider. It uses your API quota.
-Raw tool payloads, working directories, hidden reasoning, and environment values are
-excluded. Recognizable secrets are redacted, but task/headline text may still contain
-private project information. Only enable this with a provider appropriate for that data.
+Progress summaries work without extra configuration. Selecting a session uses the installed
+Codex, Claude Code, or OpenCode CLI login, preferring the session's runtime. Observatory
+sends the goal, project label, reported state, wait reason,
+and up to 30 recent activity headlines through that CLI. This uses its existing account
+and may count against that account's quota. Raw tool payloads, working directories,
+environment values, and hidden reasoning are excluded. Task and headline text can still
+contain private project information, so summaries are generated only for selected sessions.
 
-Set these in the terminal that launches Observatory:
+If no installed CLI can generate a response, Observatory shows a deterministic local
+summary based on recorded events. It does not claim unobserved work is complete. The fleet
+overview is always local. Summary activity is ephemeral and is not saved to the event
+database.
 
-```sh
-export OBSERVATORY_SUMMARY_URL='https://api.openai.com/v1/chat/completions'
-export OBSERVATORY_SUMMARY_MODEL='YOUR_MODEL_ID'
-export OBSERVATORY_SUMMARY_KEY_ENV='OPENAI_API_KEY'
-# OPENAI_API_KEY must already be set securely in this terminal.
-agent-observatory
-```
-
-The URL is the full **Chat Completions** endpoint, and the model must be available to
-your account. Other compatible providers can use their endpoint, model, and API key
-variable. The default key variable is `OBSERVATORY_SUMMARY_API_KEY`. A compatible local
-server can use an HTTP localhost URL without an API key. No key is saved to the database.
-The request uses `max_completion_tokens` and `store: false`; compatible providers must
-support those fields. See the [API request schema](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
-
-Summaries run only on request, in the background. An unchanged snapshot reuses its
-summary for the lifetime of the UI; new session activity marks it as an earlier snapshot.
-Provider failures leave the dashboard available. Generated text is labeled and does
-not override recorded status. Internal approval reviews are excluded.
+An explicitly configured Chat Completions provider remains supported as an override using
+`OBSERVATORY_SUMMARY_URL`, `OBSERVATORY_SUMMARY_MODEL`, and the optional
+`OBSERVATORY_SUMMARY_KEY_ENV` setting. No provider configuration is required for ordinary
+use. Internal approval reviews are excluded from summary evidence.

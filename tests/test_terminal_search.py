@@ -17,6 +17,7 @@ class ExampleApi:
 
     def __init__(self):
         now = time.time_ns()
+        self.requests=[]
         self.activity = [{'source_id': 'event-1', 'service': 'codex', 'session_id': 'session-1',
                           'time_unix_nano': now, 'domain': 'shell', 'action': 'run',
                           'subject': 'git status --short', 'result': 'success', 'detail': ''}]
@@ -41,6 +42,7 @@ class ExampleApi:
                              'integrations': ['local-session-log'], 'span_count': 1} for item in self.sessions]
 
     def get(self, path):
+        self.requests.append(path)
         route = urlsplit(path)
         query = parse_qs(route.query).get('q', [''])[0].casefold()
         def matches(items):
@@ -52,7 +54,12 @@ class ExampleApi:
         if route.path == '/api/connections':
             return {'connections': self.connections}
         if route.path == '/api/activity':
-            return {'activity': matches(self.activity)}
+            items=matches(self.activity)
+            params=parse_qs(route.query)
+            for key in ('domain','action','service','session_id'):
+                expected=params.get(key,[''])[0]
+                if expected:items=[item for item in items if str(item.get(key) or '').casefold()==expected.casefold()]
+            return {'activity': items}
         if route.path == '/api/mcp':
             return {'calls': matches(self.mcp)}
         if route.path == '/api/sessions':
@@ -89,7 +96,21 @@ class FeedSearchTest(unittest.TestCase):
         self.assertEqual(feed.snapshot.mcp_results, [])
         self.assertEqual(len(feed.snapshot.mcp), 1)
         self.assertEqual(len(feed.snapshot.activity), 1)
-        self.assertEqual(feed.snapshot.queries, {'activity': 'git status', 'mcp': 'missing-server', 'traces': 'release'})
+        self.assertEqual(feed.snapshot.queries, {'activity': 'git status', 'activity_prompts': False,
+                                                 'mcp': 'missing-server', 'traces': 'release'})
+
+    def test_prompt_filter_requests_only_user_messages_for_selected_scope(self):
+        feed=ManualFeed()
+        feed.api.activity.append({**feed.api.activity[0], 'source_id':'prompt-1',
+            'domain':'message','action':'user','subject':'Please fix the release notes'})
+        feed.service='codex';feed.session_id='session-1'
+        feed.activity_prompts=True
+        feed.refresh()
+        self.assertEqual([item['source_id'] for item in feed.snapshot.activity_results],['prompt-1'])
+        self.assertTrue(feed.snapshot.queries['activity_prompts'])
+        request=next(path for path in feed.api.requests if '/api/activity?' in path and 'action=user' in path)
+        params=parse_qs(urlsplit(request).query)
+        self.assertEqual(params['session_id'],['session-1'])
 
 
 class EvidenceRenderingTest(unittest.TestCase):

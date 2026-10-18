@@ -13,7 +13,7 @@ from rich.text import Text
 from textual.events import MouseDown, MouseMove, MouseUp
 from textual.geometry import Offset
 from textual.selection import Selection
-from textual.widgets import TabbedContent
+from textual.widgets import Button, DataTable, Select, TabbedContent
 
 from observatory.core import Store, normalize_native
 from observatory.terminal import Feed
@@ -31,6 +31,35 @@ async def drag(app, pilot, log, start, end):
 
 
 class PointerCopyTest(unittest.IsolatedAsyncioTestCase):
+    async def test_prompts_button_shows_selected_agents_prompt_history(self):
+        feed=ManualFeed()
+        base=feed.api.activity[0]
+        feed.api.activity.extend([
+            {**base,'source_id':'prompt-1','domain':'message','action':'user',
+             'subject':'Check the release status'},
+            {**base,'source_id':'prompt-2','service':'claude','session_id':'session-2',
+             'domain':'message','action':'user','subject':'Write release notes'},
+        ])
+        app=ObservatoryApp(feed)
+        async with app.run_test(size=(150,42)) as pilot:
+            await pilot.pause()
+            app.action_page('activity')
+            await pilot.pause()
+            app.query_one('#scope',Select).value='source-1'
+            await pilot.pause()
+            await pilot.click('#prompts-activity')
+            await pilot.pause()
+            table=app.query_one('#activity-table',DataTable)
+            self.assertEqual(feed.session_id,'session-1')
+            self.assertEqual(table.row_count,1,
+                f"filter={feed.activity_prompts}, queries={feed.snapshot.queries}, "
+                f"rows={[item.get('source_id') for item in app.table_data['activity-table'].values()]}, "
+                f"requests={[path for path in feed.api.requests if path.startswith('/api/activity')]}")
+            self.assertEqual(next(iter(app.table_data['activity-table'].values()))['subject'],
+                             'Check the release status')
+            self.assertEqual(app.query_one('#results-activity').border_title,'User prompts · newest first')
+            self.assertEqual(str(app.query_one('#prompts-activity',Button).label),'Prompts ●')
+
     async def test_history_buttons_and_search_input_copy(self):
         feed=ManualFeed();feed.api=PagedApi();feed.extra_cache=None;feed.refresh()
         app=ObservatoryApp(feed)
@@ -168,6 +197,24 @@ class HistoryStoreTest(unittest.TestCase):
         self.assertEqual(len(keys),1105)
         self.assertEqual(len(keys),len(set(keys)))
         with self.assertRaises(ValueError):self.store.activity_page(cursor='invalid')
+
+    def test_activity_can_filter_to_user_prompts_within_one_session(self):
+        records=[
+            self.log(10,trace='c'*32,attrs={'agent.activity.domain':'message',
+                'agent.activity.action':'user','agent.activity.subject':'First request'}),
+            self.log(20,trace='c'*32,attrs={'agent.activity.domain':'message',
+                'agent.activity.action':'assistant','agent.activity.subject':'Working on it'}),
+            self.log(30,trace='c'*32,attrs={'agent.activity.domain':'message',
+                'agent.activity.action':'user','agent.activity.subject':'Follow-up request'}),
+            self.log(40,trace='d'*32,attrs={'session.id':'other-session',
+                'agent.activity.domain':'message','agent.activity.action':'user',
+                'agent.activity.subject':'Different agent request'}),
+        ]
+        self.store.ingest_logs(records)
+        page=self.store.activity_page(limit=10,service='codex',session_id='session-old',
+                                      domain='message',action='USER')
+        self.assertEqual([item['subject'] for item in page['activity']],
+                         ['Follow-up request','First request'])
 
     def test_mcp_pages_keep_span_and_log_evidence_together_and_search_history(self):
         spans=[];logs=[]

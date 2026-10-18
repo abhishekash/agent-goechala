@@ -231,6 +231,7 @@ class Feed:
         self.service = ""
         self.query = ""
         self.activity_query = ""
+        self.activity_prompts = False
         self.mcp_query = ""
         self.errors_only = False
         self.selected_trace = None
@@ -251,11 +252,13 @@ class Feed:
 
     def refresh(self):
         service, query, errors_only, selected = self.service, self.query, self.errors_only, self.selected_trace
-        activity_query, mcp_query = self.activity_query, self.mcp_query
+        activity_query, mcp_query, activity_prompts = self.activity_query, self.mcp_query, self.activity_prompts
         requested_trace, requested_span = selected, self.selected_span_id
         session_id, include_reviews = self.session_id, self.include_reviews
         for page, text in (('activity',activity_query),('mcp',mcp_query),('traces',query)):
             scope=(service,session_id,text,include_reviews)
+            if page=='activity':
+                scope+=(activity_prompts,)
             if self.history_scopes.get(page)!=scope:
                 self.history[page]=[None]
                 self.history_scopes[page]=scope
@@ -273,8 +276,11 @@ class Feed:
                                    "include_reviews":int(include_reviews)}
                 activity_page = self.api.get("/api/activity?" + urlencode(activity_params))
                 activity = activity_page['activity']
-                if activity_query or history['activity'][-1]:
-                    activity_page = self.api.get("/api/activity?" + urlencode({**activity_params,
+                result_params = dict(activity_params)
+                if activity_prompts:
+                    result_params.update(domain='message', action='user')
+                if activity_query or history['activity'][-1] or activity_prompts:
+                    activity_page = self.api.get("/api/activity?" + urlencode({**result_params,
                         "q":activity_query,"cursor":history['activity'][-1] or ''}))
                 activity_results = activity_page['activity']
                 page_result('activity',activity_page)
@@ -335,7 +341,7 @@ class Feed:
             if not selected:
                 findings = self.api.get("/api/findings?limit=8")["findings"]
             # A filter changed while the HTTP reads were in flight; discard the older view.
-            if (service, query, activity_query, mcp_query, errors_only, session_id, include_reviews) != (self.service, self.query, self.activity_query, self.mcp_query, self.errors_only, self.session_id, self.include_reviews):
+            if (service, query, activity_query, mcp_query, errors_only, session_id, include_reviews, activity_prompts) != (self.service, self.query, self.activity_query, self.mcp_query, self.errors_only, self.session_id, self.include_reviews, self.activity_prompts):
                 self.wake.set()
                 return
             if self.selected_trace!=requested_trace or self.selected_span_id!=requested_span or history!={page:tuple(cursors) for page,cursors in self.history.items()}:
@@ -345,7 +351,8 @@ class Feed:
             self.snapshot = Snapshot(totals, agents, traces, detail, findings, updated=time.time(), local_status=local_status, activity=activity,
                                      sessions=sessions,mcp=mcp,mcp_available=mcp_available,mcp_summary=mcp_summary,
                                      activity_results=activity_results[:200],mcp_results=mcp_results,
-                                     queries={'activity':activity_query,'mcp':mcp_query,'traces':query},pagination=pagination)
+                                     queries={'activity':activity_query,'activity_prompts':activity_prompts,
+                                              'mcp':mcp_query,'traces':query},pagination=pagination)
         except Exception as exc:
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
                 message = "Receiver requires authentication. Set OBSERVATORY_TOKEN and restart."

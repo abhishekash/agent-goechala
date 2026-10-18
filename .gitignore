@@ -10,6 +10,7 @@ __pycache__/
 *.sqlite3
 *.log
 build/
+rust/target/
 *.egg-info/
 dist/
 .coverage

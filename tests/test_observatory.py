@@ -316,6 +316,22 @@ class ObservatoryTest(unittest.TestCase):
         self.assertEqual(request("/api/spans", {"service": "custom-agent", "spans": [span]})[1]["accepted"], 1)
         request("/api/progress", {"trace_id": TID, "stage": "retrieving", "message": "2 docs", "percent": 50})
         self.assertEqual(request("/api/traces")[1]["traces"][0]["services"], ["custom-agent"])
+        self.store.ingest_logs([
+            {'time_unix_nano': 30, 'trace_id': None, 'span_id': None, 'service': 'custom-agent',
+             'scope_name': 'test', 'severity_number': 9, 'severity_text': 'INFO',
+             'event_name': 'agent.activity', 'body': 'Check the deployment',
+             'attributes': {'session.id': 'api-session', 'agent.activity.domain': 'message',
+                            'agent.activity.action': 'user', 'agent.activity.subject': 'Check the deployment'},
+             'resource_attributes': {}},
+            {'time_unix_nano': 31, 'trace_id': None, 'span_id': None, 'service': 'custom-agent',
+             'scope_name': 'test', 'severity_number': 9, 'severity_text': 'INFO',
+             'event_name': 'agent.activity', 'body': 'I will check it',
+             'attributes': {'session.id': 'api-session', 'agent.activity.domain': 'message',
+                            'agent.activity.action': 'assistant', 'agent.activity.subject': 'I will check it'},
+             'resource_attributes': {}},
+        ])
+        prompt_page=request('/api/activity?domain=message&action=user&session_id=api-session')[1]
+        self.assertEqual([item['subject'] for item in prompt_page['activity']], ['Check the deployment'])
         self.assertIn('next_cursor', request('/api/activity')[1])
         self.assertIn('next_cursor', request('/api/mcp')[1])
         self.assertEqual(request('/api/activity?cursor=invalid')[0], 400)
