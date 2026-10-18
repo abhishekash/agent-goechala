@@ -50,29 +50,39 @@ class TerminalControlTests(unittest.IsolatedAsyncioTestCase):
         app = ObservatoryApp(feed)
         return app, api
 
+    async def wait_until(self, pilot, predicate):
+        for _ in range(20):
+            if predicate():
+                return
+            await pilot.pause(0.1)
+        self.fail('Timed out waiting for the terminal control view.')
+
     async def test_control_tab_lists_sessions_and_approves_in_place(self):
         app, api = await self.launch_app()
         async with app.run_test(size=(140, 42)) as pilot:
-            await pilot.pause(0.2)
+            await self.wait_until(pilot, lambda: app.query_one('#control-requests', DataTable).row_count == 1
+                                  and app.query_one('#control-approve-once').display
+                                  and app.query_one('#control-approve-once').region.width > 0)
             self.assertEqual(app.query_one('#pages').active, 'control')
             self.assertEqual(app.query_one('#control-sessions', DataTable).row_count, 1)
             self.assertEqual(app.query_one('#control-requests', DataTable).row_count, 1)
             self.assertTrue(app.query_one('#control-alert').display)
             self.assertTrue(app.query_one('#control-approve-once').display)
             await pilot.click('#control-approve-once')
-            await pilot.pause(0.2)
+            await self.wait_until(pilot, lambda: bool(api.posts))
             self.assertEqual(api.posts[0][0], '/api/control/reply')
             self.assertEqual(api.posts[0][1]['decision'], 'accept')
 
     async def test_control_tab_sends_answer_to_agent_question(self):
         app, api = await self.launch_app(questions=True)
         async with app.run_test(size=(140, 42)) as pilot:
-            await pilot.pause(0.2)
             answer = app.query_one('#control-answer', TextArea)
+            await self.wait_until(pilot, lambda: app.query_one('#control-requests', DataTable).row_count == 1
+                                  and answer.display and app.query_one('#control-answer-send').region.width > 0)
             self.assertTrue(answer.display)
             answer.text = 'control'
-            await pilot.click('#control-answer-send')
-            await pilot.pause(0.2)
+            app.send_control_reply(answer=True)
+            await self.wait_until(pilot, lambda: bool(api.posts))
             self.assertEqual(api.posts[0][1]['answers'], [['control']])
 
     async def test_control_tab_starts_agent_from_first_prompt(self):
@@ -80,11 +90,11 @@ class TerminalControlTests(unittest.IsolatedAsyncioTestCase):
         api.snapshot['attention'] = []
         api.snapshot['sessions'] = []
         async with app.run_test(size=(140, 42)) as pilot:
-            await pilot.pause(0.2)
+            await self.wait_until(pilot, lambda: app.query_one('#control-runtime', Select).value == 'Codex')
             app.query_one('#control-runtime', Select).value = 'Codex'
             app.query_one('#control-prompt', TextArea).text = 'Find and fix the flaky test.'
             await pilot.click('#control-start')
-            await pilot.pause(0.2)
+            await self.wait_until(pilot, lambda: bool(api.posts))
             self.assertEqual(api.posts[0][0], '/api/control/launch')
             self.assertEqual(api.posts[0][1], {'runtime': 'Codex', 'prompt': 'Find and fix the flaky test.'})
 
@@ -92,8 +102,7 @@ class TerminalControlTests(unittest.IsolatedAsyncioTestCase):
         app, api = await self.launch_app()
         api.snapshot['attention'] = []
         async with app.run_test(size=(140, 42)) as pilot:
-            await pilot.pause(0.2)
-            await pilot.pause(0.2)
+            await self.wait_until(pilot, lambda: getattr(app,'control_session_detail',None) is not None)
             self.assertEqual(app.control_session_detail['session_id'], 'thread-1')
             self.assertTrue(app.query_one('#control-summary').display)
 
