@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,6 @@ import textwrap
 import unicodedata
 import urllib.error
 import urllib.request
-import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,15 +74,25 @@ class Api:
         with urllib.request.urlopen(request, timeout=3) as response:
             return json.load(response)
 
+    def post(self, path, body):
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.endpoint + path, data=json.dumps(body).encode(),
+                                         headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+
 
 class LocalReceiver:
-    def __init__(self, db_path, port, token, local_agents=True, metadata_only=False):
+    def __init__(self, db_path, port, token, local_agents=True, metadata_only=False, opencode_url=None):
         from http.server import ThreadingHTTPServer
         from .core import Store
         from .server import handler_for
         self.store = Store(db_path, async_derived_refresh=True)
         try:
-            self.server = ThreadingHTTPServer(("127.0.0.1", port), handler_for(self.store, token, quiet=True))
+            self.server = ThreadingHTTPServer(("127.0.0.1", port), handler_for(
+                self.store, token, quiet=True, endpoint=f"http://127.0.0.1:{port}", opencode_url=opencode_url))
         except OSError:
             self.store.close()
             raise
@@ -145,6 +155,52 @@ class AgentProcess:
                     self.process.kill()
                 self.process.wait()
         self.thread.join(timeout=1)
+
+
+def start_local_opencode():
+    """Start a loopback OpenCode server for one-command local use."""
+    if os.environ.get("OBSERVATORY_OPENCODE_URL"):
+        return None, None
+    executable = shutil.which("opencode")
+    if not executable:
+        return None, None
+    try:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+    except OSError:
+        return None, None
+    password = os.environ.get("OBSERVATORY_OPENCODE_PASSWORD") or os.environ.get("OPENCODE_SERVER_PASSWORD")
+    env = os.environ.copy()
+    if password:
+        env["OPENCODE_SERVER_PASSWORD"] = password
+    try:
+        process = subprocess.Popen([executable, "serve", "--hostname", "127.0.0.1", "--port", str(port)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, env=env,
+                                   start_new_session=os.name != "nt")
+    except OSError:
+        return None, None
+    from .control import ControlError, OpenCode
+    url = f"http://127.0.0.1:{port}"
+    client = OpenCode(url=url, password=password,
+                      username=os.environ.get("OBSERVATORY_OPENCODE_USERNAME", "opencode"))
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            process.wait()
+            return None, None
+        try:
+            client.request("GET", "/session")
+            return process, url
+        except ControlError:
+            time.sleep(.1)
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    return None, None
 
 
 @dataclass
@@ -485,7 +541,7 @@ def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service=
         except ImportError as exc:
             raise CockpitError("The terminal UI needs Textual. Reinstall the CLI, or install this checkout with: python -m pip install .") from exc
     token = os.environ.get("OBSERVATORY_TOKEN")
-    receiver = agent = feed = None
+    receiver = agent = feed = opencode_process = None
     api = Api(endpoint or f"http://127.0.0.1:{port}", token)
     try:
         try:
@@ -502,8 +558,16 @@ def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service=
             if endpoint:
                 raise CockpitError("Cannot connect to the receiver at " + api.endpoint) from exc
             try:
-                receiver = LocalReceiver(db_path, port, token, local_agents=local_agents, metadata_only=metadata_only)
+                opencode_process, opencode_url = start_local_opencode() if not once else (None, None)
+                receiver = LocalReceiver(db_path, port, token, local_agents=local_agents,
+                                         metadata_only=metadata_only, opencode_url=opencode_url)
             except OSError as bind_error:
+                if opencode_process is not None:
+                    opencode_process.terminate()
+                    try:
+                        opencode_process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        opencode_process.kill()
                 raise CockpitError(f"Cannot start a local receiver on port {port}: {bind_error}") from bind_error
         feed = Feed(api)
         if target:
@@ -525,3 +589,9 @@ def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service=
                 feed.close()
         if receiver is not None:
             receiver.close()
+        if opencode_process is not None and opencode_process.poll() is None:
+            opencode_process.terminate()
+            try:
+                opencode_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                opencode_process.kill()

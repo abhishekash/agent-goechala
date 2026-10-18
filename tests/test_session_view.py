@@ -26,6 +26,8 @@ class SessionViewTests(unittest.IsolatedAsyncioTestCase):
                 generate.assert_not_called()
                 with patch.dict('os.environ', {'OBSERVATORY_SUMMARY_URL': 'http://localhost:1234/v1/chat/completions',
                                                'OBSERVATORY_SUMMARY_MODEL': 'local-model'}):
+                    app.action_page('agents')
+                    await pilot.pause()
                     await pilot.click('#agent-summary')
                     await app.workers.wait_for_complete()
                     await pilot.pause()

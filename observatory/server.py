@@ -20,6 +20,7 @@ from .watch import start_watchers
 from .distribution import installer_info, package_archive
 from .control import (OpenCode, ControlBroker, ControlError, claude_hook_response,
                       native_sessions, native_detail, summarize)
+from .controlled import SessionLauncher
 from .ai_summary import SummaryConfig, SummaryError
 
 UI = Path(__file__).with_name("index.html")
@@ -27,9 +28,10 @@ CONTROL_UI = Path(__file__).with_name("control.html")
 MAX_BODY = 8 * 1024 * 1024
 
 
-def handler_for(store: Store, token: str | None = None, quiet=False):
-    opencode = OpenCode()
+def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=None, opencode_url=None):
+    opencode = OpenCode(url=opencode_url)
     broker = ControlBroker()
+    launcher = SessionLauncher(opencode, base=endpoint or "http://127.0.0.1:4318", cwd=os.getcwd())
     summary_lock = threading.Lock()
     summary_cache = {}
     class Handler(BaseHTTPRequestHandler):
@@ -118,7 +120,9 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                         summary_enabled = False
                     self._json(200, {"sessions": native + live["sessions"],
                                      "attention": connected + live["attention"], "opencode_error": live["error"],
-                                     "summary_enabled": summary_enabled})
+                                     "summary_enabled": summary_enabled,
+                                     "available_runtimes": self.launcher.available(),
+                                     "launches": self.launcher.list()})
                 except ControlError as exc:
                     self._json(502, {"error": str(exc)})
             elif path == "/api/control/session":
@@ -352,7 +356,11 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                         self._json(415, {"error": "OTLP requires application/json or application/x-protobuf"})
                         return
                 body = json.loads(raw)
-                if route.path == "/api/control/reply":
+                if route.path == "/api/control/launch":
+                    if not isinstance(body, dict):
+                        raise ValueError("invalid launch request")
+                    self._json(202, self.launcher.start(body.get("runtime"), body.get("prompt")))
+                elif route.path == "/api/control/reply":
                     if not isinstance(body, dict):
                         raise ValueError("invalid reply")
                     runtime = body.get("runtime")
@@ -452,6 +460,7 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
             if not quiet and os.environ.get("OBSERVATORY_QUIET") != "1":
                 super().log_message(format, *args)
 
+    Handler.launcher = launcher
     return Handler
 
 
@@ -461,6 +470,7 @@ def serve(db_path="observatory.db", host="127.0.0.1", port=4318, token=None,
     if retention_days is not None:
         store.prune(retention_days)
     server = ThreadingHTTPServer((host, port), handler_for(store, token))
+    server.RequestHandlerClass.launcher.base = f"http://127.0.0.1:{server.server_port}"
     local = None
     if local_agents and host in {"127.0.0.1", "localhost", "::1"}:
         from .local_agents import LocalAgents

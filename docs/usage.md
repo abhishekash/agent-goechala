@@ -17,7 +17,7 @@ agent-observatory
 
 If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install agent-observatory-cli`.
 
-The cockpit opens a tabbed interface for Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. The Agents view shows individual sessions, tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Only this localhost listener is needed. Run `agent-observatory` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
+The cockpit opens one tabbed terminal interface for Control, Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. Control starts installed runtimes from a first-prompt goal, lists sessions and pending requests, and handles approvals and answers. Agents shows session tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Press **b** to open the browser dashboard when you want it. From this checkout, `python3 -m observatory` also works without installation.
 
 ### Existing Codex and Claude Code agents
 
@@ -296,47 +296,23 @@ The offline LangGraph retrieval control was run and imported alongside the harne
 
 ## Agent session overview
 
-The web dashboard also has a **Control Center** link. Its **All agents** tab combines
-local Codex and Claude Code sessions with a configured OpenCode server. Select a session
-to inspect the first observed user prompt as its goal, later messages and tool activity,
-and recorded errors. **Needs input** flashes for a known pending request (and respects
-reduced-motion settings). The second tab collects those requests. When the provider
-settings below are configured, selecting a session generates an AI progress brief;
-updates are throttled and cached for at least a minute. The summary separates done,
-current, and remaining work and labels uncertainty. The button refreshes it on demand.
+Run `agent-observatory`. It opens the terminal cockpit and starts a loopback OpenCode server
+when the OpenCode CLI is installed. In the **Control** tab, choose an available runtime,
+enter the first prompt, and press **Start agent**. That first prompt becomes the session goal.
+You can also keep launching agents from their usual terminals; Codex and Claude Code sessions
+are discovered from local records, and OpenCode sessions from the local server.
 
-For a live OpenCode connection, start an OpenCode server and set its loopback URL before
-starting Observatory. Use the same password on both sides if the OpenCode server has one:
+Select a session to inspect its goal, messages, tool activity, and recorded errors.
+New **Needs input** requests are highlighted in the Control tab; select one to approve or
+answer it there. Agents started from the Control tab have a live control channel; already-running Codex and
+Claude Code sessions are observed read-only and still need replies in their agent window.
+OpenCode sessions created through the Control tab are connected to the server started
+by Observatory. Set `OBSERVATORY_OPENCODE_URL` only when you already run a different local
+OpenCode server; if it requires a password, set `OBSERVATORY_OPENCODE_PASSWORD` too.
 
-```sh
-OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 4096
-# In the terminal that starts Observatory:
-export OBSERVATORY_OPENCODE_URL='http://127.0.0.1:4096'
-export OBSERVATORY_OPENCODE_PASSWORD='your-password'
-agent-observatory serve --port 4318
-```
-
-The OpenCode connection lists sessions and pending permissions/questions. Observatory
-checks the exact pending request and session again before sending a reply. Permission
-choices are **Approve once**, **Always allow**, and **Deny**. Questions accept option
-choices or custom text. The OpenCode URL is limited to HTTP loopback origins.
-
-Codex and Claude Code sessions discovered from their local logs remain read-only. To
-approve or answer from the Control Center, launch them with Observatory's control bridge
-while the receiver is running:
-
-```sh
-agent-observatory codex-control 'Investigate the failing tests'
-agent-observatory claude-control -- 'Investigate the failing tests'
-```
-
-`codex-control` starts one Codex app-server turn and relays its command/file approval and
-user-input requests. `claude-control` starts Claude Code with session-only hooks for
-permission requests and `AskUserQuestion`. Neither command changes global agent
-settings. The Codex bridge approves a request once or denies it; Claude Code's hook
-approves once or denies it. A request that disappears or times out cannot be approved
-later. Both commands use `OBSERVATORY_ENDPOINT` (default `http://127.0.0.1:4318`) and
-`OBSERVATORY_TOKEN` if the receiver requires one. The bridge requires a local receiver.
+When a compatible summary provider is configured, selecting a session can generate an AI
+progress brief. Summaries separate done, current, and remaining work and label uncertainty.
+They remain off until you configure a provider as described below.
 
 Approvals affect agent actions, so review the shown command, file change, or tool input
 before choosing. A shared receiver should use its bearer token, TLS, and a trusted

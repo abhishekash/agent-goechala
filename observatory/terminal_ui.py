@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from pathlib import Path
@@ -24,7 +25,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.strip import Strip
-from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
+from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, TextArea, Tree
 
 from .terminal import clean, number, trace_name
 
@@ -440,9 +441,10 @@ class ObservatoryScreen(Screen):
 
 class ObservatoryApp(App):
     TITLE='Agent Observatory'
-    AUTO_FOCUS='#agent-table'
+    AUTO_FOCUS='#control-prompt'
     CSS='''
     Screen { background: #0d1117; color: #dce4ed; }
+    Screen.control-mode #summary, Screen.control-mode #controls { display: none; }
     Screen > .screen--selection { background: #315a73; color: #ffffff; }
     * { scrollbar-color: #405566; scrollbar-color-hover: #6b8995; scrollbar-color-active: #6ee7c2; scrollbar-background: #101720; scrollbar-background-hover: #101720; scrollbar-background-active: #101720; }
     #masthead { height: 2; padding: 0 2; align-vertical: middle; }
@@ -507,6 +509,23 @@ class ObservatoryApp(App):
     .expanded #mcp-servers { display: none; }
     #agent-table { height: 1fr; min-height: 3; }
     #agent-bottom { height: 14; margin-top: 1; }
+    #control-pane { height: 1fr; }
+    #control-launch { height: auto; min-height: 10; margin-bottom: 1; padding: 1; }
+    #control-prompt { height: 4; margin: 1 0; }
+    #control-launch-row { height: 3; }
+    #control-runtime { width: 24; margin-right: 1; }
+    #control-start { width: 16; }
+    #control-status { height: 1; color: #8b9bb0; }
+    #control-alert { height: 1; color: #f2c779; text-style: bold; }
+    #control-alert.pulse { color: #0d1117; background: #f2c779; }
+    #control-workspace { height: 1fr; }
+    #control-sessions-box { width: 1fr; margin-right: 1; }
+    #control-attention-box { width: 1fr; }
+    #control-sessions, #control-requests { height: 1fr; min-height: 4; }
+    #control-detail { height: 5; margin-top: 1; }
+    #control-answer { height: 2; margin-top: 1; }
+    #control-actions { height: 3; margin-top: 1; }
+    #control-actions Button { width: 1fr; }
     #agent-info { width: 1fr; margin-right: 1; }
     #agent-detail { width: 100%; height: 1fr; }
     #agent-open { height: 3; width: 1fr; }
@@ -558,7 +577,8 @@ class ObservatoryApp(App):
               Binding('l','history("latest")','Latest',show=False),
               Binding('p','pause','Pause'),Binding('a','all','Reset',show=False),Binding('v','reviews','Reviews',show=False),
               Binding('b','browser','Web'),Binding('q','quit','Quit'),Binding('escape','back','Back',show=False),
-              Binding('s','focus_agent','Focus agent',show=False),Binding('1','page("agents")','Agents',show=False),
+              Binding('s','focus_agent','Focus agent',show=False),Binding('0','page("control")','Control',show=False),
+              Binding('1','page("agents")','Agents',show=False),
               Binding('2','page("activity")','Activity',show=False),Binding('3','page("mcp")','MCP',show=False),
               Binding('4','page("traces")','Traces',show=False),Binding('5','page("host")','Host',show=False),Binding('6','page("output")','Output',show=False)]
 
@@ -583,6 +603,13 @@ class ObservatoryApp(App):
         self.navigation_history=[]
         self.ai_summaries={}
         self.summary_busy=False
+        self.control_snapshot={"sessions":[],"attention":[],"available_runtimes":{},"launches":[]}
+        self.control_tables={"control-sessions":{},"control-requests":{}}
+        self.selected_control_session=''
+        self.selected_control_request=''
+        self.control_signature=None
+        self.control_error=''
+        self.control_runtime_options=None
 
     def results(self,page,table,placeholder,classes=''):
         """Keep a view's filter, result count, and rows in one panel."""
@@ -617,7 +644,31 @@ class ObservatoryApp(App):
             yield Static('',id='controls-spacer')
             yield Checkbox('Reviews',id='reviews')
             yield Button('Pause',id='pause')
-        with TabbedContent(initial='agents',id='pages'):
+        with TabbedContent(initial='control',id='pages'):
+            with TabPane('0  Control',id='control'):
+                with Vertical(id='control-pane'):
+                    with Vertical(classes='box',id='control-launch'):
+                        yield Static('Start an agent · your first prompt becomes its goal',id='control-launch-title')
+                        yield TextArea(id='control-prompt',show_line_numbers=False,soft_wrap=True,
+                                       placeholder='Describe the goal for this agent…')
+                        with Horizontal(id='control-launch-row'):
+                            yield Select([],prompt='Choose an installed agent',id='control-runtime')
+                            yield Button('Start agent',id='control-start',variant='primary')
+                            yield Static('Run agents, inspect progress, and answer requests here.',id='control-status',markup=False)
+                    yield Static('',id='control-alert',markup=False)
+                    with Horizontal(id='control-workspace'):
+                        with Vertical(classes='box',id='control-sessions-box'):
+                            yield ResultsTable(id='control-sessions',cursor_type='row',zebra_stripes=True)
+                        with Vertical(classes='box',id='control-attention-box'):
+                            yield ResultsTable(id='control-requests',cursor_type='row',zebra_stripes=True)
+                            yield RichLog(id='control-detail',wrap=True,markup=False,auto_scroll=False)
+                            yield TextArea(id='control-answer',show_line_numbers=False,soft_wrap=True)
+                            with Horizontal(id='control-actions'):
+                                yield Button('Approve once',id='control-approve-once',variant='success')
+                                yield Button('Always allow',id='control-approve-always')
+                                yield Button('Deny',id='control-deny',variant='error')
+                                yield Button('Send answer',id='control-answer-send',variant='primary')
+                                yield Button('AI summary',id='control-summary')
             with TabPane('1  Agents',id='agents'):
                 yield self.results('agents','agent-table','Filter agents by task, project, model, or session…')
                 with Horizontal(id='agent-bottom'):
@@ -667,6 +718,8 @@ class ObservatoryApp(App):
 
     def on_mount(self):
         columns={
+            'control-sessions':[('Agent',11,0),('State',12,0),('Project',16,1),('Goal / task',30,3)],
+            'control-requests':[('Needs input',18,1),('Session',12,1),('Request',10,0)],
             'agent-table':[('Agent',11,0),('Session ID',12,1),('Repo / project',14,2),('Status',12,0),('Updated',8,0),('Waiting on',16,2),('Task / details',22,4)],
             'agent-actions':[('Time',8,0),('Type',7,0),('Recent actions',15,1)],
             'activity-table':[('Time',8,0),('Type',7,0),('Result',9,0),('Action',20,1)],
@@ -678,6 +731,12 @@ class ObservatoryApp(App):
             self.query_one('#'+name,ResultsTable).configure(cols)
         for name,title in [('results-agents','Agent sessions'),('agent-detail','Session overview'),('agent-actions','Recent work'),('results-activity','Activity stream'),('activity-inspector','Event detail'),('mcp-servers','Servers observed in this scope · all stored history'),('results-mcp','MCP calls'),('mcp-inspector','Call detail'),('results-traces','Traces'),('trace-detail','Execution tree'),('results-host','Agent processes'),('host-detail','Collection status')]:
             self.query_one('#'+name).border_title=title
+        self.query_one('#control-sessions').border_title='All agent sessions'
+        self.query_one('#control-requests').border_title='Needs input · requests you can handle here'
+        self.query_one('#control-detail').border_title='Selected agent or request'
+        self.query_one('#control-alert').display=False
+        for name in ('control-answer','control-approve-once','control-approve-always','control-deny','control-answer-send','control-summary'):
+            self.query_one('#'+name).display=False
         for page in self.search_queries:
             self.query_one('#results-'+page).border_subtitle='↑↓ select  ·  Enter inspect'
             self.query_one('#search-'+page).tooltip='Search this view · / to focus · Esc to return'
@@ -687,14 +746,287 @@ class ObservatoryApp(App):
             log.tooltip='Drag to select text · Ctrl+C copies selection · c copies details'
         self.query_one('#host-detail').styles.height=8
         self.update_layout()
+        self.screen.set_class(self.query_one('#pages',TabbedContent).active=='control','control-mode')
         if not self.feed.thread.is_alive():self.feed.thread.start()
         self.refresh_timer=self.set_interval(.3,self.refresh_data)
-        self.query_one('#agent-table',DataTable).focus()
+        self.control_timer=self.set_interval(1.5,self.refresh_control)
+        self.control_alert_timer=self.set_interval(.65,self.flash_control_alert)
+        self.refresh_control()
+        self.query_one('#control-prompt',TextArea).focus()
 
     def on_unmount(self):
         if self.refresh_timer:self.refresh_timer.stop()
+        if getattr(self,'control_timer',None):self.control_timer.stop()
+        if getattr(self,'control_alert_timer',None):self.control_alert_timer.stop()
         for timer in self.search_timers.values():timer.stop()
 
+    def refresh_control(self):
+        if getattr(self,'control_poll_active',False):return
+        self.control_poll_active=True
+        self.control_request(lambda:self.feed.api.get('/api/control'),self.control_snapshot_received)
+
+    def control_request(self,request,finished):
+        def run():
+            try:
+                result=request();error=''
+            except Exception as exc:
+                result=None;error=str(exc)
+            try:
+                self.call_from_thread(finished,result,error)
+            except RuntimeError:
+                pass
+        threading.Thread(target=run,name='observatory-control-request',daemon=True).start()
+
+    def control_snapshot_received(self,snapshot,error):
+        self.control_poll_active=False
+        if error:
+            self.control_failed(error)
+            return
+        self.apply_control_snapshot(snapshot)
+
+    def control_failed(self,message):
+        self.control_error=message
+        if self.query('#control-status'):
+            self.query_one('#control-status',Static).update('Control connection error: '+message)
+
+    def flash_control_alert(self):
+        alert=self.query('#control-alert')
+        if alert and alert.first().display:
+            self.control_alert_pulse=not getattr(self,'control_alert_pulse',False)
+            alert.first().set_class(self.control_alert_pulse,'pulse')
+
+    def apply_control_snapshot(self,snapshot):
+        self.control_error=''
+        self.control_snapshot=snapshot
+        self.render_control()
+
+    def render_control(self):
+        if not self.query('#control-sessions'):
+            return
+        snapshot=self.control_snapshot
+        available=snapshot.get('available_runtimes') or {}
+        options=[(runtime,runtime) for runtime,enabled in available.items() if enabled]
+        picker=self.query_one('#control-runtime',Select)
+        current=picker.value
+        runtime_options=tuple(options)
+        if runtime_options!=self.control_runtime_options:
+            picker.set_options(options or [('No installed agent CLI','_none_')])
+            current=current if current in {value for _,value in options} else (options[0][1] if options else '_none_')
+            picker.value=current
+            self.control_runtime_options=runtime_options
+        picker.disabled=not options
+        sessions=snapshot.get('sessions') or []
+        requests=snapshot.get('attention') or []
+        alert=self.query_one('#control-alert',Static)
+        if requests:
+            request=requests[0]
+            session=next((item for item in sessions if item.get('runtime')==request.get('runtime') and
+                          item.get('session_id')==request.get('session_id')),{})
+            project=session.get('project') or request.get('runtime') or 'Agent'
+            alert.update(f"⚠ {project} needs input · {request.get('kind','request')}")
+            alert.display=True
+        else:
+            alert.display=False
+            alert.remove_class('pulse')
+        self.query_one('#control-requests').border_title=f'Needs input · {len(requests)} pending'
+        jobs=snapshot.get('launches') or []
+        status_text='No compatible agent CLI found.' if not options else 'Run agents, inspect progress, and answer requests here.'
+        if jobs:
+            latest=jobs[0]
+            status_text=f"{latest['runtime']} launch {latest['state']}"+((': '+latest['error']) if latest.get('error') else '')
+        self.query_one('#control-status',Static).update(status_text)
+        session_signature=tuple((self.control_session_key(item),item.get('state'),item.get('goal'),item.get('task'),
+                                 item.get('updated_ns'),item.get('waiting_for')) for item in sessions)
+        request_signature=tuple((item.get('id'),item.get('runtime'),item.get('session_id'),item.get('kind')) for item in requests)
+        signature=(session_signature,request_signature)
+        if signature!=self.control_signature:
+            old_requests=set(self.control_tables['control-requests'])
+            self.control_signature=signature
+            session_table=self.query_one('#control-sessions',DataTable)
+            session_table.clear(columns=False)
+            self.control_tables['control-sessions']={}
+            for item in sessions:
+                key=self.control_session_key(item)
+                self.control_tables['control-sessions'][key]=item
+                session_table.add_row(cell(item.get('runtime') or 'Agent'),
+                    cell(item.get('state') or 'unknown','#fbbf24' if item.get('state')=='waiting' else '#6ee7c2'),
+                    cell(item.get('project') or '—'),cell(item.get('goal') or item.get('task') or 'Goal not captured'),key=key)
+            request_table=self.query_one('#control-requests',DataTable)
+            request_table.clear(columns=False)
+            self.control_tables['control-requests']={}
+            for item in requests:
+                key=str(item.get('id') or '')
+                if not key:continue
+                self.control_tables['control-requests'][key]=item
+                session=next((s for s in sessions if s.get('runtime')==item.get('runtime') and
+                              s.get('session_id')==item.get('session_id')),{})
+                request_table.add_row(cell(item.get('runtime') or 'Agent'),
+                    cell(session.get('project') or str(item.get('session_id') or '')[-12:]),
+                    cell(item.get('kind') or 'request','#fbbf24'),key=key)
+            if self.selected_control_session not in self.control_tables['control-sessions']:
+                self.selected_control_session=next(iter(self.control_tables['control-sessions']), '')
+            if self.selected_control_request not in self.control_tables['control-requests']:
+                self.selected_control_request=next(iter(self.control_tables['control-requests']), '')
+            new_requests=set(self.control_tables['control-requests'])-old_requests
+            if new_requests:
+                request=self.control_tables['control-requests'][next(iter(new_requests))]
+                self.notify(request.get('runtime','Agent')+' is asking for input.',severity='warning',timeout=10)
+            self.render_control_detail()
+        elif not self.selected_control_request and not self.selected_control_session and sessions:
+            self.selected_control_session=self.control_session_key(sessions[0])
+            self.render_control_detail()
+
+    @staticmethod
+    def control_session_key(session):
+        return str(session.get('runtime') or '')+':'+str(session.get('session_id') or '')
+
+    def load_control_session(self,runtime,session_id):
+        self.control_request(lambda:self.feed.api.get('/api/control/session?'+urlencode({'runtime':runtime,'id':session_id})),
+            lambda detail,error:self.control_session_received(runtime,session_id,detail,error))
+
+    def control_session_received(self,runtime,session_id,detail,error):
+        self.apply_control_session_detail(runtime,session_id,detail if not error else {'error':error})
+
+    def apply_control_session_detail(self,runtime,session_id,detail):
+        if self.selected_control_request:return
+        if self.selected_control_session!=runtime+':'+session_id:return
+        self.control_session_detail=detail
+        self.render_control_detail()
+
+    def render_control_detail(self):
+        if not self.query('#control-detail'):return
+        log=self.query_one('#control-detail',RichLog)
+        log.clear()
+        request=self.control_tables['control-requests'].get(self.selected_control_request)
+        session=self.control_tables['control-sessions'].get(self.selected_control_session)
+        for name in ('control-answer','control-approve-once','control-approve-always','control-deny','control-answer-send','control-summary'):
+            self.query_one('#'+name).display=False
+        if request:
+            runtime=request.get('runtime','Agent');kind=request.get('kind','request')
+            session_label=str(request.get('session_id') or '')
+            log.write(Text(f'{runtime} · {kind} request',style='bold #e6edf3'))
+            log.write(Text('\nSession '+session_label))
+            details=request.get('detail') or {}
+            if kind=='permission':
+                log.write(Text('\nPermission: '+str(details.get('permission') or 'Approval requested'),style='bold #f2c779'))
+                if details.get('metadata'):
+                    log.write(Text('\n'+json.dumps(details['metadata'],ensure_ascii=False,indent=2)))
+                self.query_one('#control-approve-once').display=True
+                self.query_one('#control-deny').display=True
+                if runtime=='OpenCode':self.query_one('#control-approve-always').display=True
+            else:
+                questions=details.get('questions') or []
+                log.write(Text('\nAnswer each question below. For a multi-select question, separate choices with commas.'))
+                for index,question in enumerate(questions,1):
+                    log.write(Text(f"\n{index}. {question.get('question') or 'Question'}",style='bold #92b9eb'))
+                    choices=[option.get('label','') for option in question.get('options') or []]
+                    if choices:log.write(Text('  Choices: '+', '.join(choices)))
+                    if question.get('description'):log.write(Text('  '+str(question['description'])))
+                answer=self.query_one('#control-answer',TextArea)
+                answer.text=''
+                answer.placeholder='One answer per line'
+                self.query_one('#control-answer').display=True
+                self.query_one('#control-answer-send').display=True
+            return
+        if session:
+            runtime=session.get('runtime','Agent');session_id=session.get('session_id','')
+            detail=getattr(self,'control_session_detail',None)
+            if not detail or detail.get('session_id')!=session_id:
+                self.control_session_detail=None
+                log.write(Text(f"{runtime} · {session.get('state','unknown')}",style='bold #e6edf3'))
+                log.write(Text('\nLoading goal and recent activity…'))
+                self.load_control_session(runtime,session_id)
+            elif detail.get('error'):
+                log.write(Text('Could not load session: '+detail['error'],style='#ff8b92'))
+            else:
+                log.write(Text(f"{runtime} · {session.get('state','unknown')}",style='bold #e6edf3'))
+                log.write(Text('\nGoal: '+str(session.get('goal') or detail.get('goal') or 'Goal not captured')))
+                if session.get('waiting_for'):log.write(Text('\nWaiting for: '+str(session['waiting_for']),style='#f2c779'))
+                if session.get('state')=='waiting' and not session.get('can_reply'):
+                    log.write(Text('\nThis existing session is observed only. Reply in its agent terminal.',style='#8b9bb0'))
+                log.write(Text('\nRecent prompts and activity',style='bold #92b9eb'))
+                events=detail.get('events') or []
+                if not events:log.write(Text('\nNo recorded activity yet.'))
+                for event in events[-8:]:
+                    label=' · ERROR' if str(event.get('result') or '').lower() in {'error','failed'} else ''
+                    log.write(Text(f"\n{event.get('domain','event')} / {event.get('action','update')}{label}"))
+                    body=event.get('detail') or event.get('subject') or ''
+                    if body:log.write(Text('\n  '+str(body)[:700]))
+            self.query_one('#control-summary').display=True
+            return
+        log.write(Text('Select an agent or a pending request. Start an agent above to begin.',style='#8b9bb0'))
+
+    def launch_control_agent(self):
+        prompt=self.query_one('#control-prompt',TextArea).text.strip()
+        runtime=self.query_one('#control-runtime',Select).value
+        if not prompt:
+            self.notify('Enter the first prompt. It becomes the agent goal.',severity='warning')
+            self.query_one('#control-prompt').focus();return
+        if runtime in {Select.BLANK,None,'_none_'}:
+            self.notify('Choose an installed agent.',severity='warning');return
+        self.query_one('#control-start',Button).disabled=True
+        self.query_one('#control-status',Static).update('Starting '+str(runtime)+'…')
+        self.post_control_launch(str(runtime),prompt)
+
+    def post_control_launch(self,runtime,prompt):
+        self.control_request(lambda:self.feed.api.post('/api/control/launch',{'runtime':runtime,'prompt':prompt}),
+            lambda result,error:self.control_launch_finished(runtime,error))
+
+    def control_launch_finished(self,runtime,error):
+        self.query_one('#control-start',Button).disabled=False
+        if error:
+            self.query_one('#control-status',Static).update('Could not start agent: '+error)
+        else:
+            self.query_one('#control-prompt',TextArea).text=''
+            self.query_one('#control-status',Static).update(runtime+' started. Watching for progress and requests.')
+            self.refresh_control()
+
+    def send_control_reply(self,decision=None,answer=False):
+        request=self.control_tables['control-requests'].get(self.selected_control_request)
+        if not request:return
+        payload={'runtime':request['runtime'],'session_id':request['session_id'],'kind':request['kind'],'request_id':request['id']}
+        if request['kind']=='permission':payload['decision']=decision
+        else:
+            questions=(request.get('detail') or {}).get('questions') or []
+            lines=self.query_one('#control-answer',TextArea).text.splitlines()
+            if len(lines)!=len(questions) or any(not line.strip() for line in lines):
+                self.notify('Enter one answer on each line.',severity='warning');return
+            payload['answers']=[([choice.strip() for choice in line.split(',') if choice.strip()]
+                if question.get('multiple') or question.get('multiSelect') else [line.strip()])
+                for line,question in zip(lines,questions)]
+        self.query_one('#control-status',Static).update('Sending response…')
+        self.post_control_reply(payload,request['runtime'])
+
+    def post_control_reply(self,payload,runtime):
+        self.control_request(lambda:self.feed.api.post('/api/control/reply',payload),
+            lambda result,error:self.control_reply_finished(runtime,error))
+
+    def control_reply_finished(self,runtime,error):
+        if error:
+            self.notify('Could not send response: '+error,severity='error',timeout=8)
+            return
+        self.query_one('#control-status',Static).update('Response sent to '+runtime+'.')
+        self.selected_control_request=''
+        self.refresh_control()
+
+    def summarize_control_session(self):
+        session=self.control_tables['control-sessions'].get(self.selected_control_session)
+        if not session:return
+        self.query_one('#control-summary',Button).disabled=True
+        self.post_control_summary(session['runtime'],session['session_id'])
+
+    def post_control_summary(self,runtime,session_id):
+        self.control_request(lambda:self.feed.api.post('/api/control/summary',{'runtime':runtime,'session_id':session_id}),
+            lambda result,error:self.control_summary_finished(result.get('summary','No summary returned.') if result else '',error))
+
+    def control_summary_finished(self,summary,error):
+        self.query_one('#control-summary',Button).disabled=False
+        if error:
+            self.notify('AI summary unavailable: '+error,severity='warning',timeout=10)
+            return
+        log=self.query_one('#control-detail',RichLog);log.clear()
+        log.write(Text('AI progress summary',style='bold #6ee7c2'))
+        log.write(Text('\n'+summary))
     def on_resize(self,event):
         self.update_layout(event.size)
         self.call_after_refresh(self.reflow_inspectors)
@@ -1097,6 +1429,16 @@ class ObservatoryApp(App):
 
     @on(DataTable.RowHighlighted)
     def row_highlighted(self,event):
+        if event.data_table.id in self.control_tables:
+            item=self.control_tables[event.data_table.id].get(event.row_key.value)
+            if item:
+                if event.data_table.id=='control-sessions':
+                    self.selected_control_session=self.control_session_key(item)
+                    self.selected_control_request=''
+                else:
+                    self.selected_control_request=str(item.get('id') or '')
+                self.render_control_detail()
+            return
         item=self.valid_row(event)
         if not item:return
         name=event.data_table.id
@@ -1112,6 +1454,9 @@ class ObservatoryApp(App):
 
     @on(DataTable.RowSelected)
     def row_selected(self,event):
+        if event.data_table.id in self.control_tables:
+            self.row_highlighted(event)
+            return
         item=self.valid_row(event)
         if not item:return
         if event.data_table.id=='mcp-servers':
@@ -1183,10 +1528,21 @@ class ObservatoryApp(App):
     @on(TabbedContent.TabActivated,'#pages')
     def page_activated(self,event):
         self.screen.set_class(event.pane.has_class('expanded'),'inspecting')
+        self.screen.set_class(event.pane.id=='control','control-mode')
 
     @on(Button.Pressed)
     def button_pressed(self,event):
-        if event.button.id=='pause':self.action_pause()
+        if event.button.id=='control-start':self.launch_control_agent()
+        elif event.button.id=='control-approve-once':
+            request=self.control_tables['control-requests'].get(self.selected_control_request)
+            if request:self.send_control_reply('accept' if request.get('runtime')=='Codex' else 'once')
+        elif event.button.id=='control-approve-always':self.send_control_reply('always')
+        elif event.button.id=='control-deny':
+            request=self.control_tables['control-requests'].get(self.selected_control_request)
+            if request:self.send_control_reply('decline' if request.get('runtime')=='Codex' else 'reject')
+        elif event.button.id=='control-answer-send':self.send_control_reply(answer=True)
+        elif event.button.id=='control-summary':self.summarize_control_session()
+        elif event.button.id=='pause':self.action_pause()
         elif event.button.id=='history-back':self.action_history_back()
         elif event.button.id.startswith(('older-','newer-','latest-')):
             direction,page=event.button.id.split('-',1)
@@ -1363,6 +1719,9 @@ class ObservatoryApp(App):
         self.screen.clear_selection()
         self.collapse(page)
         self.query_one('#pages',TabbedContent).active=page
+        if page=='control':
+            self.query_one('#control-prompt',TextArea).focus()
+            return
         target={'agents':'agent-table','activity':'activity-table','mcp':'mcp-table','traces':'trace-table','host':'host-table','output':'agent-output'}[page]
         self.query_one('#'+target).focus()
     def action_browser(self):webbrowser.open(self.feed.api.endpoint)

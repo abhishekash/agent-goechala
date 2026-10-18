@@ -5,13 +5,14 @@ import time
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 
 from observatory.control import ControlBroker, ControlError, OpenCode, claude_hook_response, native_detail
-from observatory.controlled import CodexBridge, claude_settings
+from observatory.controlled import CodexBridge, SessionLauncher, claude_settings
 from observatory.core import Store
 from observatory.local_agents import Session
 from observatory.server import handler_for
+from observatory.terminal import start_local_opencode
 
 
 class OpenCodeTests(unittest.TestCase):
@@ -79,6 +80,22 @@ class OpenCodeTests(unittest.TestCase):
         detail = client.detail("session")
         self.assertEqual(detail["goal"], "Build a dashboard")
         self.assertEqual(sum(event["result"] == "error" for event in detail["events"]), 2)
+
+    def test_start_creates_session_and_sends_first_prompt_as_goal(self):
+        client = OpenCode("http://127.0.0.1:4096")
+        calls = []
+
+        def request(method, path, body=None):
+            calls.append((method, path, body))
+            return {"id": "session-one"} if path == "/session" else None
+
+        client.request = request
+        self.assertEqual(client.start("Build the control center"),
+                         {"runtime": "OpenCode", "session_id": "session-one"})
+        self.assertEqual(calls, [
+            ("POST", "/session", {"title": "Build the control center"}),
+            ("POST", "/session/session-one/prompt_async", {
+                "parts": [{"type": "text", "text": "Build the control center"}]})])
 
 
 class NativeGoalTests(unittest.TestCase):
@@ -166,6 +183,10 @@ class ControlHTTPTests(unittest.TestCase):
                 return int(head.split()[1]), json.loads(payload) if payload else None
             self.assertEqual(request("/api/control", token=None)[0], 401)
             self.assertEqual(request("/api/control")[1]["sessions"], [])
+            handler.launcher.start = lambda runtime, prompt: {"runtime": runtime, "session_id": "session-one"}
+            launch_code, launch = request("/api/control/launch", {"runtime": "OpenCode", "prompt": "Fix the bug"})
+            self.assertEqual(launch_code, 202)
+            self.assertEqual(launch, {"runtime": "OpenCode", "session_id": "session-one"})
             self.assertEqual(request("/api/control/request", {"runtime": "Codex", "session_id": "thread-1",
                 "kind": "permission", "detail": {"permission": "shell"}}, origin="https://other.example")[0], 403)
             code, item = request("/api/control/request", {"runtime": "Codex", "session_id": "thread-1",
@@ -200,4 +221,50 @@ class ControlHTTPTests(unittest.TestCase):
             hook.join(timeout=2)
             self.assertFalse(hook.is_alive())
             self.assertEqual(hook_result["response"][1]["hookSpecificOutput"]["decision"]["behavior"], "allow")
+
+
+class SessionLauncherTests(unittest.TestCase):
+    def test_codex_launch_runs_in_background_and_reports_completion(self):
+        finished = threading.Event()
+        with patch("observatory.controlled.shutil.which", return_value="/usr/bin/codex"), \
+             patch("observatory.controlled.CodexBridge") as bridge:
+            bridge.return_value.run.side_effect = lambda: (finished.set() or 0)
+            launcher = SessionLauncher(OpenCode(""), base="http://127.0.0.1:4318", cwd="/tmp/project")
+            result = launcher.start("Codex", "Build the control center")
+            self.assertEqual(result["runtime"], "Codex")
+            self.assertTrue(finished.wait(1))
+            job = launcher.list()[0]
+            self.assertEqual(job["state"], "completed")
+            bridge.assert_called_once_with("Build the control center", base="http://127.0.0.1:4318",
+                                           cwd="/tmp/project", quiet=True)
+
+    def test_empty_prompt_is_rejected(self):
+        launcher = SessionLauncher(OpenCode(""), base="http://127.0.0.1:4318")
+        with self.assertRaisesRegex(ControlError, "Enter a prompt"):
+            launcher.start("Codex", " \n ")
+
+
+class OneCommandStartupTests(unittest.TestCase):
+    def test_existing_open_code_url_is_reused_without_spawning_another_server(self):
+        with patch.dict("os.environ", {"OBSERVATORY_OPENCODE_URL": "http://127.0.0.1:4096"}), \
+             patch("observatory.terminal.shutil.which") as which:
+            self.assertEqual(start_local_opencode(), (None, None))
+            which.assert_not_called()
+
+    def test_installed_open_code_server_starts_on_loopback_and_is_ready_checked(self):
+        process = Mock()
+        process.poll.return_value = None
+        sock = MagicMock()
+        sock.__enter__.return_value.getsockname.return_value = ("127.0.0.1", 49152)
+        with patch.dict("os.environ", {"OBSERVATORY_OPENCODE_URL": ""}), \
+             patch("observatory.terminal.shutil.which", return_value="/usr/bin/opencode"), \
+             patch("observatory.terminal.socket.socket", return_value=sock), \
+             patch("observatory.terminal.subprocess.Popen", return_value=process) as popen, \
+             patch("observatory.control.OpenCode") as client:
+            started, url = start_local_opencode()
+        self.assertIs(started, process)
+        self.assertEqual(url, "http://127.0.0.1:49152")
+        self.assertEqual(popen.call_args.args[0], ["/usr/bin/opencode", "serve", "--hostname",
+                                                   "127.0.0.1", "--port", "49152"])
+        client.return_value.request.assert_called_once_with("GET", "/session")
 

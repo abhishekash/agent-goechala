@@ -253,6 +253,17 @@ class OpenCode:
         goal = next((event["detail"] for event in events if event["domain"] == "message" and event["action"] == "user"), "")
         return {"goal": goal, "events": events}
 
+    def start(self, prompt):
+        """Create an OpenCode session and submit its first prompt."""
+        title = prompt.splitlines()[0].strip()[:120] or "Agent task"
+        session = self.request("POST", "/session", {"title": title})
+        session_id = session.get("id") if isinstance(session, dict) else None
+        if not isinstance(session_id, str) or not session_id:
+            raise ControlError("OpenCode did not return a session ID")
+        self.request("POST", "/session/" + quote(session_id, safe="") + "/prompt_async",
+                     {"parts": [{"type": "text", "text": prompt}]})
+        return {"runtime": "OpenCode", "session_id": session_id}
+
     def reply(self, session_id, kind, request_id, decision=None, answers=None):
         if kind not in {"permission", "question"}:
             raise ControlError("Unsupported request type")
