@@ -296,47 +296,24 @@ The offline LangGraph retrieval control was run and imported alongside the harne
 
 ## Agent session overview
 
-The web dashboard also has a **Control Center** link. Its **All agents** tab combines
-local Codex and Claude Code sessions with a configured OpenCode server. Select a session
-to inspect the first observed user prompt as its goal, later messages and tool activity,
-and recorded errors. **Needs input** flashes for a known pending request (and respects
-reduced-motion settings). The second tab collects those requests. When the provider
-settings below are configured, selecting a session generates an AI progress brief;
-updates are throttled and cached for at least a minute. The summary separates done,
-current, and remaining work and labels uncertainty. The button refreshes it on demand.
+Run `agent-observatory`. It starts the terminal cockpit, opens the browser Control Center,
+and starts a loopback OpenCode server when the OpenCode CLI is installed. In **All agents**,
+choose a runtime, enter the first prompt, and press **Start**. That first prompt becomes
+the session goal. You can also keep launching agents from their usual terminals; Codex and
+Claude Code sessions are discovered from local records, and OpenCode sessions from the
+local server.
 
-For a live OpenCode connection, start an OpenCode server and set its loopback URL before
-starting Observatory. Use the same password on both sides if the OpenCode server has one:
+Select a session to inspect its goal, messages, tool activity, and recorded errors.
+**Needs input** flashes for a pending request. Approve or answer it in that tab. Agents
+started from the Control Center have a live control channel; already-running Codex and
+Claude Code sessions are observed read-only and still need replies in their agent window.
+OpenCode sessions created through the Control Center are connected to the server started
+by Observatory. Set `OBSERVATORY_OPENCODE_URL` only when you already run a different local
+OpenCode server; if it requires a password, set `OBSERVATORY_OPENCODE_PASSWORD` too.
 
-```sh
-OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 4096
-# In the terminal that starts Observatory:
-export OBSERVATORY_OPENCODE_URL='http://127.0.0.1:4096'
-export OBSERVATORY_OPENCODE_PASSWORD='your-password'
-agent-observatory serve --port 4318
-```
-
-The OpenCode connection lists sessions and pending permissions/questions. Observatory
-checks the exact pending request and session again before sending a reply. Permission
-choices are **Approve once**, **Always allow**, and **Deny**. Questions accept option
-choices or custom text. The OpenCode URL is limited to HTTP loopback origins.
-
-Codex and Claude Code sessions discovered from their local logs remain read-only. To
-approve or answer from the Control Center, launch them with Observatory's control bridge
-while the receiver is running:
-
-```sh
-agent-observatory codex-control 'Investigate the failing tests'
-agent-observatory claude-control -- 'Investigate the failing tests'
-```
-
-`codex-control` starts one Codex app-server turn and relays its command/file approval and
-user-input requests. `claude-control` starts Claude Code with session-only hooks for
-permission requests and `AskUserQuestion`. Neither command changes global agent
-settings. The Codex bridge approves a request once or denies it; Claude Code's hook
-approves once or denies it. A request that disappears or times out cannot be approved
-later. Both commands use `OBSERVATORY_ENDPOINT` (default `http://127.0.0.1:4318`) and
-`OBSERVATORY_TOKEN` if the receiver requires one. The bridge requires a local receiver.
+When a compatible summary provider is configured, selecting a session can generate an AI
+progress brief. Summaries separate done, current, and remaining work and label uncertainty.
+They remain off until you configure a provider as described below.
 
 Approvals affect agent actions, so review the shown command, file change, or tool input
 before choosing. A shared receiver should use its bearer token, TLS, and a trusted

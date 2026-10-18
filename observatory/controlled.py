@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
+import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
-from .control import ControlError, claude_hook_response
+from .control import ControlError, OpenCode, claude_hook_response
 
 
 def endpoint(value=None):
@@ -53,7 +56,7 @@ def claude_settings():
                       "PreToolUse": [{"matcher": "AskUserQuestion", "hooks": [hook]}]}}
 
 
-def launch_claude(arguments, *, base=None):
+def launch_claude(arguments, *, base=None, cwd=None):
     base = endpoint(base)
     api("/api/health", base=base)
     with tempfile.TemporaryDirectory(prefix="observatory-claude-") as root:
@@ -62,7 +65,7 @@ def launch_claude(arguments, *, base=None):
         settings.chmod(0o600)
         env = {**os.environ, "OBSERVATORY_ENDPOINT": base}
         command = ["claude", "--settings", str(settings), *arguments]
-        return subprocess.call(command, env=env)
+        return subprocess.call(command, env=env, cwd=cwd)
 
 
 def run_claude_hook():
@@ -77,10 +80,11 @@ def run_claude_hook():
 
 
 class CodexBridge:
-    def __init__(self, prompt, *, base=None, cwd=None):
+    def __init__(self, prompt, *, base=None, cwd=None, quiet=False):
         self.prompt = prompt
         self.base = endpoint(base)
         self.cwd = str(Path(cwd or os.getcwd()).resolve())
+        self.quiet = quiet
         self.process = None
         self.write_lock = threading.Lock()
         self.pending = set()
@@ -191,18 +195,21 @@ class CodexBridge:
             thread_id = started["thread"]["id"]
             self.rpc(3, "turn/start", {"threadId": thread_id,
                                        "input": [{"type": "text", "text": self.prompt}]})
-            print("Codex session " + thread_id + " is visible in Observatory Control Center", flush=True)
+            if not self.quiet:
+                print("Codex session " + thread_id + " is visible in Observatory Control Center", flush=True)
             while True:
                 message = self.events.pop(0) if self.events else self.read()
                 method, params = message.get("method"), message.get("params") or {}
                 if "id" in message and method:
                     self.handle_request(message)
                 elif method == "item/agentMessage/delta":
-                    sys.stdout.write(str(params.get("delta") or ""))
-                    sys.stdout.flush()
+                    if not self.quiet:
+                        sys.stdout.write(str(params.get("delta") or ""))
+                        sys.stdout.flush()
                 elif method == "turn/completed" and params.get("threadId") == thread_id:
                     status = str((params.get("turn") or {}).get("status") or "unknown")
-                    print("\nTurn " + status, flush=True)
+                    if not self.quiet:
+                        print("\nTurn " + status, flush=True)
                     return 0 if status == "completed" else 1
         finally:
             for request_id, owner_token in list(self.pending):
@@ -216,3 +223,64 @@ class CodexBridge:
                     self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     self.process.kill()
+
+
+class SessionLauncher:
+    """Start controlled agent sessions from the browser Control Center."""
+
+    def __init__(self, opencode, *, base=None, cwd=None):
+        self.opencode = opencode
+        self.base = endpoint(base)
+        self.cwd = str(Path(cwd or os.getcwd()).resolve())
+        self.lock = threading.Lock()
+        self.jobs = {}
+
+    def available(self):
+        return {"OpenCode": self.opencode.enabled,
+                "Codex": shutil.which("codex") is not None,
+                "Claude Code": shutil.which("claude") is not None}
+
+    def list(self):
+        with self.lock:
+            return sorted((dict(job) for job in self.jobs.values()),
+                          key=lambda job: job["created_ns"], reverse=True)[:10]
+
+    def start(self, runtime, prompt):
+        if runtime not in {"OpenCode", "Codex", "Claude Code"}:
+            raise ControlError("Choose OpenCode, Codex, or Claude Code")
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
+            raise ControlError("Enter a prompt of 1 to 12000 characters")
+        prompt = prompt.strip()
+        if runtime == "OpenCode":
+            return self.opencode.start(prompt)
+        executable = shutil.which("codex" if runtime == "Codex" else "claude")
+        if not executable:
+            raise ControlError(runtime + " CLI is not installed")
+        job_id = uuid.uuid4().hex
+        job = {"id": job_id, "runtime": runtime, "state": "starting", "error": "",
+               "created_ns": time.time_ns()}
+        with self.lock:
+            self.jobs[job_id] = job
+        worker = threading.Thread(target=self._run, args=(job_id, runtime, prompt),
+                                  name="observatory-launch-" + runtime.lower().replace(" ", "-"), daemon=True)
+        worker.start()
+        return {"runtime": runtime, "job_id": job_id, "state": "starting"}
+
+    def _run(self, job_id, runtime, prompt):
+        with self.lock:
+            self.jobs[job_id]["state"] = "running"
+        try:
+            if runtime == "Codex":
+                status = CodexBridge(prompt, base=self.base, cwd=self.cwd, quiet=True).run()
+            else:
+                status = launch_claude(["--print", prompt], base=self.base, cwd=self.cwd)
+            with self.lock:
+                job = self.jobs[job_id]
+                job["state"] = "completed" if status == 0 else "failed"
+                if status:
+                    job["error"] = runtime + " exited with status " + str(status)
+        except Exception as exc:
+            with self.lock:
+                job = self.jobs[job_id]
+                job["state"] = "failed"
+                job["error"] = str(exc)[:500] or type(exc).__name__
