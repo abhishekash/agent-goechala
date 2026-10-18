@@ -264,17 +264,28 @@ class OpenCode:
         if kind == "permission":
             if decision not in {"once", "always", "reject"}:
                 raise ControlError("Invalid permission decision")
-            path = "/permission/" + quote(request_id, safe="") + "/reply"
-            body = {"reply": decision}
+            path = ("/session/" + quote(session_id, safe="") + "/permissions/"
+                    + quote(request_id, safe=""))
+            body = {"response": decision}
+            legacy_path = "/permission/" + quote(request_id, safe="") + "/reply"
+            legacy_body = {"reply": decision}
         else:
             if not isinstance(answers, list) or len(answers) != len(request.get("questions") or []):
                 raise ControlError("Answer each question before replying")
             if not all(isinstance(group, list) and group and all(isinstance(value, str) and value.strip() and len(value) <= 1000
                            for value in group) for group in answers):
                 raise ControlError("Question answers must be nonempty text")
-            path = "/question/" + quote(request_id, safe="") + "/reply"
+            path = ("/session/" + quote(session_id, safe="") + "/question/"
+                    + quote(request_id, safe="") + "/reply")
             body = {"answers": answers}
-        self.request("POST", path, body)
+            legacy_path = "/question/" + quote(request_id, safe="") + "/reply"
+            legacy_body = body
+        try:
+            self.request("POST", path, body)
+        except ControlError as exc:
+            if str(exc) != "OpenCode returned HTTP 404":
+                raise
+            self.request("POST", legacy_path, legacy_body)
         return {"accepted": True}
 
 

@@ -35,6 +35,22 @@ class OpenCodeTests(unittest.TestCase):
             client.reply("two", "permission", "p1", decision="once")
         self.assertEqual(len(calls), 1)
         self.assertEqual(client.reply("one", "permission", "p1", decision="once"), {"accepted": True})
+        self.assertEqual(calls[-1], ("POST", "/session/one/permissions/p1", {"response": "once"}))
+
+    def test_permission_reply_falls_back_to_legacy_open_code_api(self):
+        client = OpenCode("http://127.0.0.1:4096")
+        calls = []
+
+        def request(method, path, body=None):
+            calls.append((method, path, body))
+            if path == "/permission":
+                return [{"id": "p1", "sessionID": "one"}]
+            if path == "/session/one/permissions/p1":
+                raise ControlError("OpenCode returned HTTP 404")
+            return True
+
+        client.request = request
+        client.reply("one", "permission", "p1", decision="once")
         self.assertEqual(calls[-1], ("POST", "/permission/p1/reply", {"reply": "once"}))
 
     def test_question_requires_each_answer(self):
@@ -51,7 +67,7 @@ class OpenCodeTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlError, "Answer each"):
             client.reply("one", "question", "q1", answers=[])
         client.reply("one", "question", "q1", answers=[["yes"]])
-        self.assertEqual(calls[-1], ("POST", "/question/q1/reply", {"answers": [["yes"]]}))
+        self.assertEqual(calls[-1], ("POST", "/session/one/question/q1/reply", {"answers": [["yes"]]}))
 
     def test_goal_and_error_from_open_code_messages(self):
         client = OpenCode("http://127.0.0.1:4096")
