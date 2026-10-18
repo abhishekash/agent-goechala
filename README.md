@@ -78,7 +78,7 @@ These install the checkout as an isolated uv tool. Re-run the script after pulli
 - **Traces:** parent/child spans, model usage, errors, and evidence for each operation.
 - **Host:** known local agent processes and basic resource use, shown separately from sessions.
 - **Web dashboard:** searchable live activity with the same local receiver.
-- **Control Center:** start with `agent-observatory`; it opens the local control page and can launch Codex, Claude Code, or OpenCode from a first-prompt goal. Inspect session activity and errors, then answer pending requests in the same place. [Learn more](docs/usage.md#agent-session-overview).
+- **Control:** `agent-observatory` opens one terminal cockpit. Its Control tab starts Codex, Claude Code, or OpenCode from a first-prompt goal, shows live sessions and errors, and handles pending approvals and questions in place. Press **b** only when you want the browser dashboard. [Learn more](docs/usage.md#agent-session-overview).
 
 The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading.
 

@@ -17,7 +17,6 @@ import textwrap
 import unicodedata
 import urllib.error
 import urllib.request
-import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,6 +72,15 @@ class Api:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         request = urllib.request.Request(self.endpoint + path, headers=headers)
         with urllib.request.urlopen(request, timeout=3) as response:
+            return json.load(response)
+
+    def post(self, path, body):
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.endpoint + path, data=json.dumps(body).encode(),
+                                         headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
 
 
@@ -570,11 +578,6 @@ def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service=
         if once:
             print_snapshot(feed, agent)
         else:
-            if urlsplit(api.endpoint).hostname in {"127.0.0.1", "localhost", "::1"}:
-                try:
-                    webbrowser.open(api.endpoint + "/control")
-                except OSError:
-                    pass
             ObservatoryApp(feed, agent, receiver is not None).run()
     except KeyboardInterrupt:
         pass

@@ -17,7 +17,7 @@ agent-observatory
 
 If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install agent-observatory-cli`.
 
-The cockpit opens a tabbed interface for Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. The Agents view shows individual sessions, tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Only this localhost listener is needed. Run `agent-observatory` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
+The cockpit opens one tabbed terminal interface for Control, Agents, Activity, MCP, Traces and Host, plus Output when it launches an agent. Control starts installed runtimes from a first-prompt goal, lists sessions and pending requests, and handles approvals and answers. Agents shows session tasks, models and recent work. Session counts and live process counts are separate; approval reviews are hidden by default. It attaches to a receiver on **127.0.0.1:14318**, or starts one there. Press **b** to open the browser dashboard when you want it. From this checkout, `python3 -m observatory` also works without installation.
 
 ### Existing Codex and Claude Code agents
 
@@ -296,18 +296,17 @@ The offline LangGraph retrieval control was run and imported alongside the harne
 
 ## Agent session overview
 
-Run `agent-observatory`. It starts the terminal cockpit, opens the browser Control Center,
-and starts a loopback OpenCode server when the OpenCode CLI is installed. In **All agents**,
-choose a runtime, enter the first prompt, and press **Start**. That first prompt becomes
-the session goal. You can also keep launching agents from their usual terminals; Codex and
-Claude Code sessions are discovered from local records, and OpenCode sessions from the
-local server.
+Run `agent-observatory`. It opens the terminal cockpit and starts a loopback OpenCode server
+when the OpenCode CLI is installed. In the **Control** tab, choose an available runtime,
+enter the first prompt, and press **Start agent**. That first prompt becomes the session goal.
+You can also keep launching agents from their usual terminals; Codex and Claude Code sessions
+are discovered from local records, and OpenCode sessions from the local server.
 
 Select a session to inspect its goal, messages, tool activity, and recorded errors.
-**Needs input** flashes for a pending request. Approve or answer it in that tab. Agents
-started from the Control Center have a live control channel; already-running Codex and
+New **Needs input** requests are highlighted in the Control tab; select one to approve or
+answer it there. Agents started from the Control tab have a live control channel; already-running Codex and
 Claude Code sessions are observed read-only and still need replies in their agent window.
-OpenCode sessions created through the Control Center are connected to the server started
+OpenCode sessions created through the Control tab are connected to the server started
 by Observatory. Set `OBSERVATORY_OPENCODE_URL` only when you already run a different local
 OpenCode server; if it requires a password, set `OBSERVATORY_OPENCODE_PASSWORD` too.
 
