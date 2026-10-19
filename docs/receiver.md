@@ -1,12 +1,12 @@
 # Receiver and OTLP
 
-Start the local web dashboard and OTLP/HTTP receiver:
+Start the local OTLP/HTTP receiver for the terminal cockpit:
 
 ```bash
 agent-observatory serve --port 14318
 ```
 
-Open `http://127.0.0.1:14318`. The receiver uses `./observatory.db` unless `--db` selects another path. It accepts OTLP traces, logs, and metrics at `/v1/traces`, `/v1/logs`, and `/v1/metrics` in protobuf or JSON.
+The receiver uses `./observatory.db` unless `--db` selects another path. Its root address is a plain-text status message; inspect sessions in `agent-observatory`. It accepts OTLP traces, logs, and metrics at `/v1/traces`, `/v1/logs`, and `/v1/metrics` in protobuf or JSON.
 
 Point an OpenTelemetry SDK at the receiver:
 
@@ -31,3 +31,4 @@ agent-observatory prune --older-than-days 30
 ```
 
 For complete OTLP field mappings, APIs, collector configuration, and examples, see the [full guide](usage.md).
+For framework-specific connection examples, see [Connect agent frameworks](frameworks.md).

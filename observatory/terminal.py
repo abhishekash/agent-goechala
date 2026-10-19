@@ -6,8 +6,6 @@ import os
 import re
 import shlex
 import shutil
-import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -17,7 +15,6 @@ import textwrap
 import unicodedata
 import urllib.error
 import urllib.request
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -74,25 +71,15 @@ class Api:
         with urllib.request.urlopen(request, timeout=3) as response:
             return json.load(response)
 
-    def post(self, path, body):
-        headers = {"Content-Type": "application/json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        request = urllib.request.Request(self.endpoint + path, data=json.dumps(body).encode(),
-                                         headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.load(response)
-
 
 class LocalReceiver:
-    def __init__(self, db_path, port, token, local_agents=True, metadata_only=False, opencode_url=None):
+    def __init__(self, db_path, port, token, local_agents=True, metadata_only=False):
         from http.server import ThreadingHTTPServer
         from .core import Store
         from .server import handler_for
         self.store = Store(db_path, async_derived_refresh=True)
         try:
-            self.server = ThreadingHTTPServer(("127.0.0.1", port), handler_for(
-                self.store, token, quiet=True, endpoint=f"http://127.0.0.1:{port}", opencode_url=opencode_url))
+            self.server = ThreadingHTTPServer(("127.0.0.1", port), handler_for(self.store, token, quiet=True))
         except OSError:
             self.store.close()
             raise
@@ -113,96 +100,6 @@ class LocalReceiver:
         self.store.close()
 
 
-class AgentProcess:
-    def __init__(self, target, arguments, endpoint, service, python, module=False, capture_content=False):
-        command = [python, "-u", "-m", "observatory", "run", "--endpoint", endpoint, "--service", service]
-        if module:
-            command.append("--module")
-        if capture_content:
-            command.append("--capture-content")
-        command.extend([target, *arguments])
-        self.lines = deque(maxlen=400)
-        self.lines.append("Starting " + clean(target))
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        text=True, encoding="utf-8", errors="replace",
-                                        start_new_session=os.name != "nt")
-        self.thread = threading.Thread(target=self._read, name="observatory-agent-output", daemon=True)
-        self.thread.start()
-
-    def _read(self):
-        with self.process.stdout:
-            for line in self.process.stdout:
-                self.lines.append(clean(line.rstrip()))
-
-    def close(self):
-        if self.process.poll() is None:
-            if os.name != "nt":
-                try:
-                    os.killpg(self.process.pid, signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-            else:
-                self.process.terminate()
-            try:
-                self.process.wait(timeout=4)
-            except subprocess.TimeoutExpired:
-                if os.name != "nt":
-                    try:
-                        os.killpg(self.process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                else:
-                    self.process.kill()
-                self.process.wait()
-        self.thread.join(timeout=1)
-
-
-def start_local_opencode():
-    """Start a loopback OpenCode server for one-command local use."""
-    if os.environ.get("OBSERVATORY_OPENCODE_URL"):
-        return None, None
-    executable = shutil.which("opencode")
-    if not executable:
-        return None, None
-    try:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-    except OSError:
-        return None, None
-    password = os.environ.get("OBSERVATORY_OPENCODE_PASSWORD") or os.environ.get("OPENCODE_SERVER_PASSWORD")
-    env = os.environ.copy()
-    if password:
-        env["OPENCODE_SERVER_PASSWORD"] = password
-    try:
-        process = subprocess.Popen([executable, "serve", "--hostname", "127.0.0.1", "--port", str(port)],
-                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, env=env,
-                                   start_new_session=os.name != "nt")
-    except OSError:
-        return None, None
-    from .control import ControlError, OpenCode
-    url = f"http://127.0.0.1:{port}"
-    client = OpenCode(url=url, password=password,
-                      username=os.environ.get("OBSERVATORY_OPENCODE_USERNAME", "opencode"))
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            process.wait()
-            return None, None
-        try:
-            client.request("GET", "/session")
-            return process, url
-        except ControlError:
-            time.sleep(.1)
-    process.terminate()
-    try:
-        process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        process.kill()
-    return None, None
-
-
 @dataclass
 class Snapshot:
     totals: dict = field(default_factory=dict)
@@ -210,6 +107,7 @@ class Snapshot:
     traces: list = field(default_factory=list)
     detail: dict = field(default_factory=dict)
     findings: list = field(default_factory=list)
+    finding_results: list = field(default_factory=list)
     error: str = ""
     updated: float = 0
     local_status: dict = field(default_factory=dict)
@@ -218,6 +116,13 @@ class Snapshot:
     mcp: list = field(default_factory=list)
     mcp_summary: dict = field(default_factory=dict)
     mcp_available: bool = True
+    metric_catalog: list = field(default_factory=list)
+    metric_points: list = field(default_factory=list)
+    usage_series: list = field(default_factory=list)
+    usage_service: str | None = None
+    usage_session_id: str | None = None
+    metric_history: list = field(default_factory=list)
+    metrics_available: bool = True
     activity_results: list | None = None
     mcp_results: list | None = None
     queries: dict = field(default_factory=dict)
@@ -231,6 +136,7 @@ class Feed:
         self.service = ""
         self.query = ""
         self.activity_query = ""
+        self.activity_prompts = False
         self.mcp_query = ""
         self.errors_only = False
         self.selected_trace = None
@@ -242,8 +148,11 @@ class Feed:
         self.extra_updated = 0
         self.extra_scope = None
         self.paused = False
-        self.history = {page: [None] for page in ('activity','mcp','traces')}
+        self.history = {page: [None] for page in ('activity','mcp','traces','findings')}
         self.history_scopes = {}
+        self.findings_cache = None
+        self.findings_scope = None
+        self.findings_updated = 0
         self.refresh_once = False
         self.stop = threading.Event()
         self.wake = threading.Event()
@@ -256,6 +165,8 @@ class Feed:
         session_id, include_reviews = self.session_id, self.include_reviews
         for page, text in (('activity',activity_query),('mcp',mcp_query),('traces',query)):
             scope=(service,session_id,text,include_reviews)
+            if page=='activity':
+                scope+=(self.activity_prompts,)
             if self.history_scopes.get(page)!=scope:
                 self.history[page]=[None]
                 self.history_scopes[page]=scope
@@ -273,8 +184,11 @@ class Feed:
                                    "include_reviews":int(include_reviews)}
                 activity_page = self.api.get("/api/activity?" + urlencode(activity_params))
                 activity = activity_page['activity']
-                if activity_query or history['activity'][-1]:
-                    activity_page = self.api.get("/api/activity?" + urlencode({**activity_params,
+                result_params = dict(activity_params)
+                if self.activity_prompts:
+                    result_params.update(domain='message', action='user')
+                if activity_query or history['activity'][-1] or self.activity_prompts:
+                    activity_page = self.api.get("/api/activity?" + urlencode({**result_params,
                         "q":activity_query,"cursor":history['activity'][-1] or ''}))
                 activity_results = activity_page['activity']
                 page_result('activity',activity_page)
@@ -300,10 +214,40 @@ class Feed:
                     if exc.code!=404:
                         raise
                     mcp,mcp_results,mcp_available,mcp_page,mcp_summary=[],[],False,{},{}
-                self.extra_cache = sessions,mcp,mcp_results,mcp_available,mcp_page,mcp_summary
+                try:
+                    metric_catalog = self.api.get('/api/metric-catalog?limit=500')['metrics']
+                    metric_params = {'limit': 500, 'latest': 1}
+                    if service:
+                        metric_params['service'] = service
+                    metric_points = self.api.get('/api/measurements?' + urlencode(metric_params))['points']
+                    metrics_available = True
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    metric_catalog, metric_points, metrics_available = [], [], False
+                try:
+                    usage_params = {'days': 7, 'step': 'day'}
+                    if service:
+                        usage_params['service'] = service
+                    if session_id:
+                        usage_params['session_id'] = session_id
+                    usage = self.api.get('/api/usage-series?' + urlencode(usage_params))
+                    usage_series = usage.get('points', [])
+                    usage_service = usage.get('service')
+                    usage_session_id = usage.get('session_id')
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    usage_series, usage_service, usage_session_id = [], None, None
+                self.extra_cache = (sessions,mcp,mcp_results,mcp_available,mcp_page,mcp_summary,
+                                    metric_catalog,metric_points,metrics_available,usage_series,usage_service,
+                                    usage_session_id)
                 self.extra_scope,self.extra_updated = scope,time.monotonic()
-            sessions,mcp,mcp_results,mcp_available,mcp_page,mcp_summary=self.extra_cache
+            (sessions,mcp,mcp_results,mcp_available,mcp_page,mcp_summary,
+             metric_catalog,metric_points,metrics_available,usage_series,usage_service,
+             usage_session_id)=self.extra_cache
             page_result('mcp',mcp_page)
+            metric_history=[]
             params = {"limit": 100, "service": service, "session_id": session_id, "q": query,
                       "cursor":history['traces'][-1] or '', 'include_reviews':int(include_reviews)}
             if errors_only:
@@ -334,6 +278,17 @@ class Feed:
             findings = detail.get("findings", [])
             if not selected:
                 findings = self.api.get("/api/findings?limit=8")["findings"]
+            findings_scope=history['findings']
+            if (self.findings_cache is None or self.findings_scope!=findings_scope or
+                    time.monotonic()-self.findings_updated>3):
+                finding_params={'limit':100,'cursor':findings_scope[-1] or ''}
+                finding_page=self.api.get('/api/findings?'+urlencode(finding_params))
+                self.findings_cache=finding_page
+                self.findings_scope=findings_scope
+                self.findings_updated=time.monotonic()
+            else:
+                finding_page=self.findings_cache
+            page_result('findings',finding_page)
             # A filter changed while the HTTP reads were in flight; discard the older view.
             if (service, query, activity_query, mcp_query, errors_only, session_id, include_reviews) != (self.service, self.query, self.activity_query, self.mcp_query, self.errors_only, self.session_id, self.include_reviews):
                 self.wake.set()
@@ -344,7 +299,13 @@ class Feed:
             self.selected_trace = selected
             self.snapshot = Snapshot(totals, agents, traces, detail, findings, updated=time.time(), local_status=local_status, activity=activity,
                                      sessions=sessions,mcp=mcp,mcp_available=mcp_available,mcp_summary=mcp_summary,
+                                     metric_catalog=metric_catalog,metric_points=metric_points,
+                                     usage_series=usage_series,usage_service=usage_service,
+                                     usage_session_id=usage_session_id,
+                                     metric_history=metric_history,
+                                     metrics_available=metrics_available,
                                      activity_results=activity_results[:200],mcp_results=mcp_results,
+                                     finding_results=finding_page.get('findings',[]),
                                      queries={'activity':activity_query,'mcp':mcp_query,'traces':query},pagination=pagination)
         except Exception as exc:
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
@@ -354,6 +315,13 @@ class Feed:
             old = self.snapshot
             from dataclasses import replace
             self.snapshot = replace(old,error=message)
+
+    def metric_history(self, metric, limit=100):
+        params={'limit':max(1,min(500,int(limit)))}
+        for key in ('service','name','kind','temporality','scope_name','unit','description'):
+            if metric.get(key) is not None:
+                params[key]=metric[key]
+        return self.api.get('/api/measurements?'+urlencode(params))['points']
 
     def request_refresh(self):
         self.refresh_once = True
@@ -455,24 +423,29 @@ def wrapped(text, width):
     return lines
 
 
-def print_snapshot(feed, agent=None):
+def print_snapshot(feed):
     feed.refresh()
     snapshot = feed.snapshot
     totals = snapshot.totals
+    def token_count(record, key):
+        if record.get(key + '_reported') is False:
+            return 'Not reported'
+        return number(record.get(key))
     print("OBSERVATORY  " + feed.api.endpoint)
     if snapshot.local_status.get("enabled"):
         mode = "bounded, redacted content" if snapshot.local_status.get('capture_content') else "metadata only"
-        print(f"Source: local Codex / Claude Code session logs · {snapshot.local_status.get('sources', 0)} files · {mode}")
+        opencode_count=sum(entry.get('runtime')=='OpenCode' for entry in snapshot.local_status.get('sessions',[]))
+        print(f"Sources: local Codex / Claude Code logs · {snapshot.local_status.get('sources', 0)} files · "
+              f"OpenCode · {opencode_count} recent sessions · {mode}")
     print(f"Runs {number(totals.get('runs'))}  Spans {number(totals.get('spans'))}  "
-          f"Tokens {number(totals.get('input_tokens'))} in / {number(totals.get('output_tokens'))} out  "
+          f"Tokens {token_count(totals, 'input_tokens')} in / {token_count(totals, 'output_tokens')} out  "
           f"Errors {number(totals.get('errors'))}  Known cost ${totals.get('known_cost_usd', 0):.4f}")
     for title, rows in (
         ("CONNECTED AGENTS", [f"{label}  {state}" for _, label, state in agent_rows(snapshot)[1:]]),
-        ("RECENT TRACES", [f"{item['status']:10} {trace_name(item)}  {number(item['input_tokens'])} in / {number(item['output_tokens'])} out" for item in snapshot.traces[:10]]),
+        ("RECENT TRACES", [f"{item['status']:10} {trace_name(item)}  {token_count(item, 'input_tokens')} in / {token_count(item, 'output_tokens')} out" for item in snapshot.traces[:10]]),
         ("SELECTED TRACE / SPANS", span_rows(snapshot)[:10]),
         ("LIVE PROGRESS / ERRORS", event_rows(snapshot)[:8]),
         ("RECENT ACTIVITY", activity_rows(snapshot)[:12]),
-        ("AGENT OUTPUT", list(agent.lines)[-5:] if agent else []),
     ):
         print("\n+-- " + title + " " + "-" * max(0, 66-len(title)))
         for line in rows or ["Waiting for telemetry. Press c in the cockpit for connection commands."]:
@@ -507,30 +480,20 @@ def open_terminal(command):
     raise CockpitError("No graphical terminal is available. Run the cockpit in your current terminal, or use --once.")
 
 
-def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service="my-agent", target=None,
-                arguments=(), python=None, module=False, capture_content=False, once=False, new_window=False, local_agents=True, metadata_only=False):
+def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None,
+                once=False, new_window=False, local_agents=True, metadata_only=False):
     if not 1 <= port <= 65535:
         raise CockpitError("Choose a port between 1 and 65535.")
-    if once and target:
-        raise CockpitError("--once prints a snapshot. Omit the agent filename, or run the interactive cockpit to launch it.")
     if new_window:
-        command = [sys.executable, "-m", "observatory", "--db", str(Path(db_path).resolve()), "cockpit", "--port", str(port), "--service", service]
+        command = [sys.executable, "-m", "observatory", "--db", str(Path(db_path).resolve()), "cockpit", "--port", str(port)]
         if endpoint:
             command.extend(["--endpoint", endpoint])
-        if python:
-            command.extend(["--python", python])
-        if module:
-            command.append("--module")
-        if capture_content:
-            command.append("--capture-content")
         if not local_agents:
             command.append("--no-local-agents")
         if metadata_only:
             command.append("--metadata-only")
         if once:
             command.append("--once")
-        if target:
-            command.extend([str(Path(target).resolve()) if not module else target, *arguments])
         open_terminal(command)
         return
     if not once and (not sys.stdin.isatty() or not sys.stdout.isatty()):
@@ -541,7 +504,7 @@ def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service=
         except ImportError as exc:
             raise CockpitError("The terminal UI needs Textual. Reinstall the CLI, or install this checkout with: python -m pip install .") from exc
     token = os.environ.get("OBSERVATORY_TOKEN")
-    receiver = agent = feed = opencode_process = None
+    receiver = feed = None
     api = Api(endpoint or f"http://127.0.0.1:{port}", token)
     try:
         try:
@@ -558,40 +521,19 @@ def run_cockpit(*, db_path="observatory.db", port=14318, endpoint=None, service=
             if endpoint:
                 raise CockpitError("Cannot connect to the receiver at " + api.endpoint) from exc
             try:
-                opencode_process, opencode_url = start_local_opencode() if not once else (None, None)
-                receiver = LocalReceiver(db_path, port, token, local_agents=local_agents,
-                                         metadata_only=metadata_only, opencode_url=opencode_url)
+                receiver = LocalReceiver(db_path, port, token, local_agents=local_agents, metadata_only=metadata_only)
             except OSError as bind_error:
-                if opencode_process is not None:
-                    opencode_process.terminate()
-                    try:
-                        opencode_process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        opencode_process.kill()
                 raise CockpitError(f"Cannot start a local receiver on port {port}: {bind_error}") from bind_error
         feed = Feed(api)
-        if target:
-            try:
-                agent = AgentProcess(target, arguments, api.endpoint, service, python or sys.executable, module, capture_content)
-            except OSError as exc:
-                raise CockpitError("Cannot launch the agent: " + str(exc)) from exc
         if once:
-            print_snapshot(feed, agent)
+            print_snapshot(feed)
         else:
-            ObservatoryApp(feed, agent, receiver is not None).run()
+            ObservatoryApp(feed).run()
     except KeyboardInterrupt:
         pass
     finally:
-        if agent is not None:
-            agent.close()
         if feed is not None:
             if feed.thread.is_alive():
                 feed.close()
         if receiver is not None:
             receiver.close()
-        if opencode_process is not None and opencode_process.poll() is None:
-            opencode_process.terminate()
-            try:
-                opencode_process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                opencode_process.kill()

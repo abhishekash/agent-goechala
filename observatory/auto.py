@@ -36,7 +36,7 @@ def _receiver_endpoint(endpoint):
     parsed = urlsplit(endpoint)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname or
             parsed.username or parsed.password or parsed.query or parsed.fragment):
-        raise SetupError("Use the dashboard's HTTP address for --endpoint, such as http://127.0.0.1:4318.")
+        raise SetupError("Use the receiver's HTTP address for --endpoint, such as http://127.0.0.1:4318.")
     return endpoint.rstrip("/")
 
 
@@ -52,7 +52,7 @@ def _check_receiver(endpoint, token):
             raise SetupError("This receiver needs a token. Set OBSERVATORY_TOKEN in your agent's terminal.") from exc
         raise SetupError(f"The receiver returned HTTP {exc.code}. Check --endpoint.") from exc
     except (OSError, urllib.error.URLError) as exc:
-        raise SetupError(f"Cannot reach Observatory at {endpoint}. Start the dashboard first, then retry.") from exc
+        raise SetupError(f"Cannot reach Observatory at {endpoint}. Start the receiver or terminal cockpit first, then retry.") from exc
 
 
 class _Connection:
@@ -195,7 +195,7 @@ def run_agent(target, arguments=(), *, endpoint="http://127.0.0.1:4318", service
             print("Observatory: some integrations could not start: " + ", ".join(failures), file=sys.stderr)
         connection = _Connection(endpoint, service, enabled, capture_content, token, source_id, events)
         connection.start()
-        print(f"Observatory is listening to {service}: {', '.join(enabled)}.\nDashboard: {endpoint}", file=sys.stderr)
+        print(f"Observatory is listening to {service}: {', '.join(enabled)}.\nReceiver: {endpoint}", file=sys.stderr)
         sys.argv = [target, *arguments]
         if module:
             runpy.run_module(target, run_name="__main__", alter_sys=True)

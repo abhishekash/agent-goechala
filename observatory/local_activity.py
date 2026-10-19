@@ -193,8 +193,6 @@ def codex_activity(session, row, stamp):
             role = "user" if item_type == "UserMessage" else "assistant"
             if role == "user" and text and session.capture_details:
                 session.tasks[session.turn] = text[:4000]
-                if not session.goal:
-                    session.goal = text[:4000]
             out.append(emit(session, row, stamp, "message", role,
                 "Approval review" if session.internal else text.splitlines()[0][:300] if text and session.capture_details else role + " message", text,
                 "observed", {"message.role": role, "message.phase": item.get("phase") or ""}))
@@ -218,8 +216,6 @@ def claude_activity(session, row, stamp):
         role = row["type"]
         if role == "user" and session.capture_details:
             session.tasks[session.turn] = text[:4000]
-            if not session.goal:
-                session.goal = text[:4000]
         out.append(emit(session, row, stamp, "message", role, text.splitlines()[0][:300] if session.capture_details else role+" message", text))
     for block in blocks:
         if not isinstance(block, dict):

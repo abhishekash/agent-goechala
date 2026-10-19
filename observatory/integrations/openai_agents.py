@@ -20,7 +20,9 @@ except ImportError as exc:  # pragma: no cover - optional integration dependency
 _SAFE_TEXT_KEYS = {"type", "name", "model", "model_name", "model_id", "provider",
                    "agent_name", "tool_name", "handoff_name", "operation"}
 _TOKEN_KEYS = {"input_tokens", "output_tokens", "prompt_tokens", "completion_tokens",
-               "total_tokens", "cached_input_tokens", "reasoning_tokens"}
+               "total_tokens", "cached_input_tokens", "cache_read_input_tokens",
+               "cache_creation_input_tokens", "cache_write_input_tokens",
+               "reasoning_tokens", "reasoning_output_tokens"}
 
 
 def _stable_id(value: Any, length: int) -> str:
@@ -68,7 +70,14 @@ def _safe_attributes(data: Any, span_kind: str, exported=None) -> dict[str, Any]
                     result[f"openai_agents.{prefix}{key}"] = item
             elif (span_kind == "generation" and normalized in _TOKEN_KEYS and
                   isinstance(item, (int, float)) and not isinstance(item, bool) and item >= 0):
-                token_name = {"prompt_tokens": "input_tokens", "completion_tokens": "output_tokens"}.get(normalized, normalized)
+                token_name = {
+                    "prompt_tokens": "input_tokens", "completion_tokens": "output_tokens",
+                    "cached_input_tokens": "cache_read.input_tokens",
+                    "cache_read_input_tokens": "cache_read.input_tokens",
+                    "cache_creation_input_tokens": "cache_write.input_tokens",
+                    "cache_write_input_tokens": "cache_write.input_tokens",
+                    "reasoning_output_tokens": "reasoning_tokens",
+                }.get(normalized, normalized)
                 result[f"gen_ai.usage.{token_name}"] = int(item)
 
     visit(exported)

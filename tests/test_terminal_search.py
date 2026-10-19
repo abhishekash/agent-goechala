@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 from observatory.terminal import Feed
 from observatory.terminal_ui import (ObservatoryApp, ObservatoryScreen, SelectableRichLog,
                                      copy_event_text, decode, decode_nested, headline,
-                                     write_system_clipboard)
+                                     usage_series_text, write_system_clipboard)
 
 
 class ExampleApi:
@@ -17,6 +17,7 @@ class ExampleApi:
 
     def __init__(self):
         now = time.time_ns()
+        self.requests = []
         self.activity = [{'source_id': 'event-1', 'service': 'codex', 'session_id': 'session-1',
                           'time_unix_nano': now, 'domain': 'shell', 'action': 'run',
                           'subject': 'git status --short', 'result': 'success', 'detail': ''}]
@@ -39,24 +40,59 @@ class ExampleApi:
              'task': 'Write release notes', 'project': 'docs', 'model': 'model-b'}]
         self.connections = [{'source_id': item['source_id'], 'service': item['service'],
                              'integrations': ['local-session-log'], 'span_count': 1} for item in self.sessions]
+        self.mcp_configurations = []
+        self.mcp_summary = {'calls': 1, 'tools': 1, 'errors': 0,
+                            'servers': [{'server': 'github', 'calls': 1, 'tools': 1, 'errors': 0}]}
+        self.findings = []
+        self.metric_catalog = [{'service':'codex','name':'agent.queue.depth','description':'Pending work',
+            'unit':'items','kind':'gauge','temporality':0,'scope_name':'demo.metrics',
+            'point_count':2,'last_ns':now}]
+        self.metric_points = [{'id':'point-1','time_unix_nano':now,'start_unix_nano':now-1_000_000_000,
+            'service':'codex','name':'agent.queue.depth','description':'Pending work','unit':'items',
+            'kind':'gauge','temporality':0,'scope_name':'demo.metrics','attributes':{'queue':'default'},
+            'resource_attributes':{'service.name':'codex','deployment.environment':'test'},
+            'data':{'value':3,'exemplars':[{'trace_id':'trace-1','span_id':'span-1','value':3}]}}]
+        self.usage_series = [{'start_unix_nano':now,'input_tokens':120,'output_tokens':30,
+            'input_tokens_reported':True,'output_tokens_reported':True,'runs':2,'errors':1,
+            'cache_read_input_tokens':20,'cache_read_input_tokens_reported':True}]
 
     def get(self, path):
+        self.requests.append(path)
         route = urlsplit(path)
-        query = parse_qs(route.query).get('q', [''])[0].casefold()
+        parameters = parse_qs(route.query)
+        query = parameters.get('q', [''])[0].casefold()
+        domain = parameters.get('domain', [''])[0].casefold()
+        action = parameters.get('action', [''])[0].casefold()
         def matches(items):
-            return [item for item in items if query in json.dumps(item).casefold()]
+            return [item for item in items if query in json.dumps(item).casefold()
+                    and (not domain or str(item.get('domain') or '').casefold()==domain)
+                    and (not action or str(item.get('action') or '').casefold()==action)]
         if route.path == '/api/health':
-            return {'local_agents': {'sessions': self.sessions, 'runtime': {'processes': []}}}
+            return {'local_agents': {'sessions': self.sessions, 'runtime': {'processes': []},
+                                     'mcp_configurations': self.mcp_configurations}}
         if route.path == '/api/metrics':
             return {'input_tokens': 100, 'output_tokens': 20}
         if route.path == '/api/connections':
             return {'connections': self.connections}
         if route.path == '/api/activity':
-            return {'activity': matches(self.activity)}
+            service = parameters.get('service', [''])[0]
+            session_id = parameters.get('session_id', [''])[0]
+            return {'activity': [item for item in matches(self.activity)
+                                 if (not service or item.get('service')==service)
+                                 and (not session_id or item.get('session_id')==session_id)]}
         if route.path == '/api/mcp':
-            return {'calls': matches(self.mcp)}
+            return {'calls': matches(self.mcp), 'summary': self.mcp_summary}
         if route.path == '/api/sessions':
             return {'sessions': []}
+        if route.path == '/api/findings':
+            return {'findings': matches(self.findings), 'next_cursor': None}
+        if route.path == '/api/metric-catalog':
+            return {'metrics': self.metric_catalog}
+        if route.path == '/api/measurements':
+            return {'points': self.metric_points}
+        if route.path == '/api/usage-series':
+            return {'points': self.usage_series, 'service': parameters.get('service', [None])[0],
+                    'session_id': parameters.get('session_id', [None])[0]}
         if route.path == '/api/traces':
             return {'traces': matches(self.traces)}
         if route.path.startswith('/api/traces/'):
@@ -291,10 +327,10 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.screen.get_selected_text(), 'py this te')
             with patch('observatory.terminal_ui.write_system_clipboard',return_value='X11'):
                 app.screen.action_copy_text()
-                for page in ('agents', 'activity', 'mcp', 'traces', 'host'):
+                for page in ('agents', 'activity', 'mcp', 'traces', 'host', 'metrics'):
                     app.action_page(page)
                     await pilot.pause()
-                    table = app.query_one('#'+{'agents': 'agent', 'activity': 'activity', 'mcp': 'mcp', 'traces': 'trace', 'host': 'host'}[page]+'-table')
+                    table = app.query_one('#'+{'agents': 'agent', 'activity': 'activity', 'mcp': 'mcp', 'traces': 'trace', 'host': 'host', 'metrics':'metrics'}[page]+'-table')
                     self.assertGreaterEqual(table.size.height, 3, (page, width, height))
                     self.assertLessEqual(table.virtual_size.width, table.scrollable_content_region.width, (page, width, height))
 
@@ -310,6 +346,34 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(app.query_one('#mcp-table').row_count, 1)
             self.assertFalse(app.query_one('#mcp-trace').disabled)
+
+            app.action_page('metrics')
+            metric=app.table_data['metrics-table'][app.selected_metric]
+            app.request_metric_history(metric,app.selected_metric)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            metrics=app.query_one('#metrics-table')
+            self.assertEqual(metrics.row_count,1)
+            self.assertEqual(str(metrics.get_row_at(0)[3]),'3')
+            self.assertIn('agent.queue.depth',app.inspector_signatures['metrics-detail'][1])
+            with patch('observatory.terminal_ui.write_system_clipboard',return_value='X11'):
+                app.action_copy()
+                await pilot.pause()
+            self.assertEqual(json.loads(app._clipboard)['name'],'agent.queue.depth')
+            self.assertIn('\n  "service": "codex",',app._clipboard)
+            self.assertFalse(app.query_one('#metrics-trace').disabled)
+            app.action_open_trace()
+            await pilot.pause()
+            self.assertEqual(feed.selected_trace,'trace-1')
+            app.action_page('metrics')
+            await pilot.pause()
+            app.query_one('#search-metrics').value='missing'
+            await pilot.pause()
+            self.assertEqual(metrics.row_count,0)
+            self.assertIn('No matching metric',str(app.query_one('#search-status-metrics').render()))
+            app.query_one('#clear-metrics').press()
+            await pilot.pause()
+            self.assertEqual(metrics.row_count,1)
 
             await pilot.resize_terminal(80, 24)
             app.action_page('mcp')
@@ -373,3 +437,103 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.focused.id, 'agent-table')
         # A refresh tick queued before shutdown must tolerate removed widgets.
         app.refresh_data()
+
+
+class FeedMetricsTest(unittest.TestCase):
+    def test_feed_loads_metric_catalog_and_latest_points(self):
+        feed=ManualFeed()
+        self.assertTrue(feed.snapshot.metrics_available)
+        self.assertEqual(feed.snapshot.metric_catalog[0]['name'],'agent.queue.depth')
+        self.assertEqual(feed.snapshot.metric_points[0]['data']['value'],3)
+        history=feed.metric_history(feed.snapshot.metric_catalog[0])
+        self.assertEqual(history[0]['data']['value'],3)
+        self.assertEqual(history[0]['data']['exemplars'][0]['trace_id'],'trace-1')
+        latest_request=next(path for path in feed.api.requests if path.startswith('/api/measurements?'))
+        latest_query=parse_qs(urlsplit(latest_request).query)
+        self.assertEqual(latest_query.get('latest'),['1'])
+        self.assertEqual(latest_query.get('limit'),['500'])
+
+    def test_feed_loads_scoped_token_usage_series(self):
+        feed=ManualFeed()
+        self.assertEqual(feed.snapshot.usage_series,feed.api.usage_series)
+        self.assertEqual(feed.snapshot.usage_service,None)
+        request=next(path for path in feed.api.requests if path.startswith('/api/usage-series?'))
+        query=parse_qs(urlsplit(request).query)
+        self.assertEqual(query.get('days'),['7'])
+        self.assertEqual(query.get('step'),['day'])
+
+    def test_feed_requests_usage_for_the_selected_session(self):
+        feed=ManualFeed()
+        feed.session_id='session-1'
+        feed.extra_cache=None
+        feed.refresh()
+        self.assertEqual(feed.snapshot.usage_session_id,'session-1')
+        request=next(path for path in reversed(feed.api.requests) if path.startswith('/api/usage-series?'))
+        self.assertEqual(parse_qs(urlsplit(request).query).get('session_id'),['session-1'])
+
+    def test_usage_history_is_readable_and_marks_unreported_tokens(self):
+        rendered=usage_series_text([{'start_unix_nano':time.time_ns(), 'input_tokens':120,
+            'output_tokens':30,'input_tokens_reported':True,'output_tokens_reported':False,
+            'runs':1,'errors':0}])
+        self.assertIn('Input 120  ·  Output Not reported',rendered)
+        self.assertIn('DATE       INPUT       OUTPUT      RUNS  ERRORS  LOGS',rendered)
+        self.assertIn('       —',rendered)
+
+
+class MetricDetailSemanticsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_temporality_is_explained_in_metric_inspector(self):
+        feed = ManualFeed()
+        now = time.time_ns()
+        feed.api.metric_catalog = [{
+            'service': 'codex', 'name': 'agent.summary', 'description': 'Completed work',
+            'unit': 'items', 'kind': 'summary', 'temporality': 0, 'scope_name': 'demo.metrics',
+            'point_count': 1, 'last_ns': now,
+        }]
+        feed.api.metric_points = [{
+            'id': 'summary-point', 'time_unix_nano': now, 'start_unix_nano': now - 1_000_000,
+            'service': 'codex', 'name': 'agent.summary', 'description': 'Completed work',
+            'unit': 'items', 'kind': 'summary', 'temporality': 0, 'scope_name': 'demo.metrics',
+            'attributes': {'queue': 'default'}, 'resource_attributes': {'service.name': 'codex'},
+            'data': {'count': 3, 'sum': 8.5, 'quantileValues': [{'quantile': 0.5, 'value': 2.5}],
+                     'temporality_assumed': 'cumulative'},
+        }]
+        feed.extra_updated = 0
+        feed.refresh()
+        app = ObservatoryApp(feed)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.action_page('metrics')
+            await pilot.pause()
+            signature = app.inspector_signatures['metrics-detail']
+            self.assertIn('agent.summary', signature[1])
+            self.assertIn('count 3 · sum 8.5', signature[1])
+            self.assertIn('Cumulative (implicit for Summary)', signature[1])
+            self.assertIn("'temporality_assumed': 'cumulative'", signature[2])
+            detail = app.query_one('#metrics-detail').plain_text
+            self.assertIn('"quantile": 0.5', detail)
+            self.assertIn('"value": 2.5', detail)
+            self.assertIn('Temporality Assumed\ncumulative', detail)
+
+
+class TokenPresenceRenderingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_usage_is_labeled_not_reported_across_views(self):
+        feed = ManualFeed()
+        feed.snapshot.totals.update(input_tokens=0, output_tokens=0,
+                                    input_tokens_reported=False, output_tokens_reported=False)
+        feed.snapshot.traces[0].update(input_tokens=0, output_tokens=0,
+                                       input_tokens_reported=False, output_tokens_reported=False)
+        feed.snapshot.sessions = [{
+            'session_id': 'session-1', 'trace_count': 1, 'span_count': 2,
+            'input_tokens': 0, 'output_tokens': 0,
+            'input_tokens_reported': False, 'output_tokens_reported': False,
+            'known_cost_usd': 0.0, 'unknown_cost_runs': 1,
+        }]
+        app = ObservatoryApp(feed)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.pause()
+            self.assertIn('Not reported / Not reported', str(app.query_one('#stat-usage').render()))
+            self.assertIn('Not reported in / Not reported out', app.query_one('#agent-detail').plain_text)
+            app.action_page('traces')
+            await pilot.pause()
+            row = app.query_one('#trace-table').get_row_at(0)
+            self.assertIn('Not reported / Not reported', str(row[3]))

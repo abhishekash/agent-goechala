@@ -2,7 +2,7 @@
 
 ## Product and first use
 
-**Agent Observatory:** a local terminal and browser dashboard for AI agent activity.
+**Agent Observatory:** a local terminal monitor for AI agent activity.
 It discovers local Codex and Claude Code session records and receives OTLP traces,
 logs, and metrics from instrumented agents. It shows sessions, tasks, MCP calls,
 recorded tool inputs/results, tokens, errors, and host processes.
@@ -18,7 +18,6 @@ on the producer's logs and instrumentation.
 
 - [Repository and first-minute guide](https://github.com/abhishekash/agent-observatory)
 - [Direct demo GIF](https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/terminal-demo.gif)
-- [Animated observability graphic](https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/observability-loop.gif) (illustrative trace)
 - [PyPI](https://pypi.org/project/agent-observatory-cli/)
 - [First-run feedback](https://github.com/abhishekash/agent-observatory/issues/new?template=first_run.yml)
 - [SpanHound: MCP trace investigation](https://github.com/abhishekash/spanhound)
@@ -35,11 +34,10 @@ I built Agent Observatory to see what my coding agents are doing across sessions
 the current task, shell commands, MCP calls, tool results, tokens, and errors.
 It reads local Codex and Claude Code session records as they change and also
 accepts OpenTelemetry from instrumented agents. The data is stored in local
-SQLite, with a terminal UI and a browser dashboard on localhost.
+SQLite, with a keyboard-first terminal interface. A small HTTP receiver accepts telemetry locally.
 
 Try it with `uvx --from agent-observatory-cli agent-observatory`. It works best
-on a machine where you already use Codex or Claude Code. Press b for the browser
-dashboard. The README animation uses synthetic example data; your dashboard
+on a machine where you already use Codex or Claude Code. The README animation uses synthetic example data; your terminal view
 shows what your local records or telemetry actually contain.
 
 This is an early MIT-licensed project. I would like feedback on missing tool
@@ -53,8 +51,7 @@ project, be available for questions, and do not solicit votes.
 
 I’ve made two tools for local AI agent observability available:
 
-Agent Observatory shows what coding agents are doing in a terminal and browser
-dashboard: sessions, tasks, MCP calls, recorded tool results, tokens, and errors.
+Agent Observatory shows what coding agents are doing in a terminal: sessions, tasks, MCP calls, recorded tool results, tokens, and errors.
 It discovers Codex and Claude Code session records and accepts OpenTelemetry
 from instrumented agents.
 

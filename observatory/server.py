@@ -1,4 +1,4 @@
-"""Small local HTTP receiver and dashboard, using only the Python standard library."""
+"""Small local HTTP receiver and API for the terminal cockpit."""
 from __future__ import annotations
 
 import hmac
@@ -7,9 +7,7 @@ import io
 import json
 import os
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .core import Store, normalize_native, normalize_otlp, TRACE_ID
@@ -17,23 +15,11 @@ from .otlp_proto import decode_trace_request
 from .logs import normalize_otlp_logs, decode_log_request
 from .metrics import normalize_otlp_metrics, decode_metric_request
 from .watch import start_watchers
-from .distribution import installer_info, package_archive
-from .control import (OpenCode, ControlBroker, ControlError, claude_hook_response,
-                      native_sessions, native_detail, summarize)
-from .controlled import SessionLauncher
-from .ai_summary import SummaryConfig, SummaryError
 
-UI = Path(__file__).with_name("index.html")
-CONTROL_UI = Path(__file__).with_name("control.html")
 MAX_BODY = 8 * 1024 * 1024
 
 
-def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=None, opencode_url=None):
-    opencode = OpenCode(url=opencode_url)
-    broker = ControlBroker()
-    launcher = SessionLauncher(opencode, base=endpoint or "http://127.0.0.1:4318", cwd=os.getcwd())
-    summary_lock = threading.Lock()
-    summary_cache = {}
+def handler_for(store: Store, token: str | None = None, quiet=False):
     class Handler(BaseHTTPRequestHandler):
         def _json(self, code, value):
             data = json.dumps(value, ensure_ascii=False).encode()
@@ -59,10 +45,9 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
 
         def _route(self):
             route = urlparse(self.path)
-            # The static shell contains no telemetry; its API requests still need a token.
-            if self.command == "GET" and route.path in {"/", "/control", "/setup.js", "/setup.css", "/activity.js", "/activity.css"}:
-                return route
-            if not self._authorized():
+            # The root is a static, non-sensitive hint for someone who opens
+            # the receiver URL in a browser. Keep every data/API route gated.
+            if route.path != "/" and not self._authorized():
                 self._json(401, {"error": "unauthorized"})
                 return None
             return route
@@ -73,25 +58,10 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                 return
             path = route.path
             if path == "/":
-                data = UI.read_bytes()
+                data = ("Agent Observatory is terminal-first. Run `agent-observatory` in a terminal "
+                        "to monitor local sessions. This HTTP service receives OTLP and serves the local API.\n").encode()
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(data)
-            elif path == "/control":
-                data = CONTROL_UI.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(data)
-            elif path in {"/setup.js", "/setup.css", "/activity.js", "/activity.css"}:
-                data = UI.with_name(path[1:]).read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
@@ -99,66 +69,6 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
             elif path == "/api/health":
                 local = getattr(store, "local_agent_monitor", None)
                 self._json(200, {"ok": True, "local_agents": local.status() if local else {"enabled": False}})
-            elif path == "/api/control":
-                try:
-                    live = opencode.snapshot()
-                    local = getattr(store, "local_agent_monitor", None)
-                    connected = broker.list()
-                    native = native_sessions(local, store)
-                    for session in native:
-                        pending = [item for item in connected if item["runtime"] == session["runtime"]
-                                   and item["session_id"] == session["session_id"]]
-                        if pending:
-                            session["attention"] = pending
-                            session["state"] = "waiting"
-                            session["waiting_for"] = ", ".join(item["kind"] for item in pending)
-                            session["can_reply"] = True
-                    try:
-                        SummaryConfig.from_env()
-                        summary_enabled = True
-                    except SummaryError:
-                        summary_enabled = False
-                    self._json(200, {"sessions": native + live["sessions"],
-                                     "attention": connected + live["attention"], "opencode_error": live["error"],
-                                     "summary_enabled": summary_enabled,
-                                     "available_runtimes": self.launcher.available(),
-                                     "launches": self.launcher.list()})
-                except ControlError as exc:
-                    self._json(502, {"error": str(exc)})
-            elif path == "/api/control/session":
-                query = parse_qs(route.query)
-                runtime, session_id = query.get("runtime", [""])[0], query.get("id", [""])[0]
-                if not session_id or len(session_id) > 512:
-                    self._json(400, {"error": "invalid session ID"})
-                elif runtime == "OpenCode":
-                    try:
-                        self._json(200, opencode.detail(session_id))
-                    except ControlError as exc:
-                        self._json(502, {"error": str(exc)})
-                elif runtime in {"Codex", "Claude Code"}:
-                    self._json(200, native_detail(store, session_id))
-                else:
-                    self._json(400, {"error": "unknown runtime"})
-            elif path == "/api/control/decision":
-                query = parse_qs(route.query)
-                request_id = query.get("id", [""])[0]
-                try:
-                    self._json(200, broker.poll(request_id, query.get("owner", [""])[0], timeout=20))
-                except ControlError as exc:
-                    self._json(404, {"error": str(exc)})
-            elif path == "/api/setup":
-                self._json(200, {**installer_info(),
-                                 "auth_required": bool(token),
-                                 "integrations": ["OpenAI Python SDK", "Anthropic Python SDK", "LangChain / LangGraph"]})
-            elif path == "/api/package":
-                data, filename = package_archive()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/gzip")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(data)
             elif path == "/api/connections":
                 self._json(200, {"connections": store.connections()})
             elif path == "/api/activity":
@@ -169,7 +79,8 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                         query=query.get("q", [None])[0], session_id=query.get("session_id", [None])[0],
                         cursor=query.get("cursor", [None])[0],
                         include_reviews=query.get("include_reviews", ["1"])[0]!="0",
-                        errors_only=query.get("errors_only", ["0"])[0]=="1")
+                        errors_only=query.get("errors_only", ["0"])[0]=="1",
+                        action=query.get("action", [None])[0])
                     self._json(200, page)
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
@@ -191,7 +102,9 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                     days = int(query.get("days", [7])[0])
                     step = query.get("step", ["day"])[0]
                     service = query.get("service", [None])[0]
-                    self._json(200, store.usage_series(days=days, step=step, service=service))
+                    session_id = query.get("session_id", [None])[0]
+                    self._json(200, store.usage_series(days=days, step=step, service=service,
+                                                       session_id=session_id))
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
             elif path == "/api/logs":
@@ -200,6 +113,11 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                 query = parse_qs(route.query, keep_blank_values=True)
                 try:
                     limit = max(1, min(500, int(query.get("limit", [500])[0])))
+                    if query.get("latest", ["0"])[0] == "1":
+                        points = store.metric_latest_points(limit=limit,
+                            service=query.get("service", [None])[0])
+                        self._json(200, {"points": points})
+                        return
                     temporality = query.get("temporality", [None])[0]
                     points = store.metric_points(limit=limit,
                         service=query.get("service", [None])[0], name=query.get("name", [None])[0],
@@ -315,15 +233,6 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
             if route is None:
                 return
             try:
-                if route.path.startswith("/api/control/"):
-                    if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
-                        self._json(415, {"error": "control requests require application/json"})
-                        return
-                    origin = self.headers.get("Origin")
-                    if origin and origin not in {"http://" + self.headers.get("Host", ""),
-                                                 "https://" + self.headers.get("Host", "")}:
-                        self._json(403, {"error": "cross-origin control request denied"})
-                        return
                 size = int(self.headers.get("Content-Length", "0"))
                 if size <= 0 or size > MAX_BODY:
                     self._json(413, {"error": "body size must be 1 to 8 MiB"})
@@ -356,75 +265,7 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
                         self._json(415, {"error": "OTLP requires application/json or application/x-protobuf"})
                         return
                 body = json.loads(raw)
-                if route.path == "/api/control/launch":
-                    if not isinstance(body, dict):
-                        raise ValueError("invalid launch request")
-                    self._json(202, self.launcher.start(body.get("runtime"), body.get("prompt")))
-                elif route.path == "/api/control/reply":
-                    if not isinstance(body, dict):
-                        raise ValueError("invalid reply")
-                    runtime = body.get("runtime")
-                    if runtime == "OpenCode":
-                        result = opencode.reply(str(body.get("session_id") or ""), str(body.get("kind") or ""),
-                                                str(body.get("request_id") or ""), body.get("decision"), body.get("answers"))
-                    elif runtime in {"Codex", "Claude Code"}:
-                        result = broker.reply(runtime, str(body.get("session_id") or ""), str(body.get("kind") or ""),
-                                              str(body.get("request_id") or ""), body.get("decision"), body.get("answers"))
-                    else:
-                        raise ValueError("this session does not have a connected control channel")
-                    self._json(200, result)
-                elif route.path == "/api/control/request":
-                    if not isinstance(body, dict) or body.get("runtime") != "Codex":
-                        raise ValueError("only the Codex bridge can register through this route")
-                    self._json(200, broker.register("Codex", body.get("session_id"), body.get("kind"),
-                                                     body.get("detail")))
-                elif route.path == "/api/control/cancel":
-                    if not isinstance(body, dict) or not isinstance(body.get("request_id"), str):
-                        raise ValueError("invalid cancellation")
-                    broker.cancel(body["request_id"], body.get("owner_token"))
-                    self._json(200, {"cancelled": True})
-                elif route.path == "/api/control/claude-hook":
-                    if not isinstance(body, dict) or body.get("hook_event_name") not in {"PermissionRequest", "PreToolUse"}:
-                        raise ValueError("unsupported Claude hook")
-                    if body.get("hook_event_name") == "PreToolUse" and body.get("tool_name") != "AskUserQuestion":
-                        self._json(200, {})
-                        return
-                    kind = "permission" if body["hook_event_name"] == "PermissionRequest" else "question"
-                    inputs = body.get("tool_input") or {}
-                    if not isinstance(inputs, dict):
-                        raise ValueError("invalid Claude tool input")
-                    detail = {"permission": body.get("tool_name"), "metadata": inputs} if kind == "permission" else {
-                        "questions": inputs.get("questions") or []}
-                    item = broker.register("Claude Code", body.get("session_id"), kind, detail)
-                    decision = broker.wait(item["id"], timeout=600)
-                    self._json(200, claude_hook_response(body, decision))
-                elif route.path == "/api/control/summary":
-                    if not isinstance(body, dict) or body.get("runtime") not in {"OpenCode", "Codex", "Claude Code"}:
-                        raise ValueError("invalid summary request")
-                    session_id = body.get("session_id")
-                    if not isinstance(session_id, str) or not 1 <= len(session_id) <= 512:
-                        raise ValueError("invalid session ID")
-                    live = opencode.snapshot() if body["runtime"] == "OpenCode" else None
-                    local = getattr(store, "local_agent_monitor", None)
-                    sessions = live["sessions"] if live else native_sessions(local, store)
-                    session = next((item for item in sessions if item["session_id"] == session_id
-                                    and item["runtime"] == body["runtime"]), None)
-                    if session is None:
-                        raise ValueError("session no longer available")
-                    detail = opencode.detail(session_id) if live else native_detail(store, session_id)
-                    session["goal"] = session.get("goal") or detail["goal"]
-                    key = body["runtime"], session_id
-                    with summary_lock:
-                        cached = summary_cache.get(key)
-                        if cached and (cached["updated_ns"] == session.get("updated_ns", 0)
-                                       or time.time() - cached["created"] < 60):
-                            result = {"summary": cached["summary"], "updated_ns": cached["updated_ns"]}
-                        else:
-                            result = {"summary": summarize(session, detail["events"]),
-                                      "updated_ns": session.get("updated_ns", 0)}
-                            summary_cache[key] = {**result, "created": time.time()}
-                    self._json(200, result)
-                elif route.path == "/api/spans":
+                if route.path == "/api/spans":
                     raw_spans = body if isinstance(body, list) else body.get("spans", [])
                     if not isinstance(raw_spans, list):
                         raise ValueError("spans must be an array")
@@ -460,7 +301,6 @@ def handler_for(store: Store, token: str | None = None, quiet=False, endpoint=No
             if not quiet and os.environ.get("OBSERVATORY_QUIET") != "1":
                 super().log_message(format, *args)
 
-    Handler.launcher = launcher
     return Handler
 
 
@@ -470,7 +310,6 @@ def serve(db_path="observatory.db", host="127.0.0.1", port=4318, token=None,
     if retention_days is not None:
         store.prune(retention_days)
     server = ThreadingHTTPServer((host, port), handler_for(store, token))
-    server.RequestHandlerClass.launcher.base = f"http://127.0.0.1:{server.server_port}"
     local = None
     if local_agents and host in {"127.0.0.1", "localhost", "::1"}:
         from .local_agents import LocalAgents
@@ -478,7 +317,7 @@ def serve(db_path="observatory.db", host="127.0.0.1", port=4318, token=None,
     store.local_agent_monitor = local
     watch = start_watchers(store, watch_jsonl, watch_service) if watch_jsonl else None
     maintenance = _start_retention(store, retention_days) if retention_days is not None else None
-    print(f"Observatory listening at http://{host}:{server.server_port} (database: {db_path})", flush=True)
+    print(f"Observatory receiver listening at http://{host}:{server.server_port} (database: {db_path})", flush=True)
     if local:
         print("Watching local Codex / Claude Code sessions · " + ("metadata only" if metadata_only else "activity and bounded, redacted content"), flush=True)
     try:

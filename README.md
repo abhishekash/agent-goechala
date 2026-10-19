@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="media/logo.png" alt="Agent Observatory logo" width="640">
-</p>
-
 # Agent Observatory
 
 [![CI](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml)
@@ -13,7 +9,7 @@
 ![OpenTelemetry OTLP](https://img.shields.io/badge/OpenTelemetry-OTLP-425CC7?logo=opentelemetry&logoColor=white)
 ![Local first](https://img.shields.io/badge/data-local--first-2E8B57)
 
-**See what your coding agents are doing, live.** Agent Observatory brings local Codex and Claude Code sessions together with OpenTelemetry from instrumented agents, so you can see which sessions are working or waiting, what they last did, which MCP tools they called, and where a trace failed. Browse it in a keyboard friendly terminal or a local web dashboard.
+**See what your coding agents are doing, live.** Agent Observatory brings local Codex, Claude Code, and OpenCode sessions together with OpenTelemetry from instrumented agents, so you can see which sessions are working or waiting, what they last did, which MCP tools they called, and where a trace failed. The app is designed to be used from a keyboard friendly terminal.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4"><img src="media/investigation-demo-preview.gif" alt="Animated walkthrough: find an agent session, inspect a failed MCP response, and follow its trace" width="960"></a>
@@ -38,25 +34,25 @@ agent-observatory
 
 Or install it into the active Python environment with `python -m pip install agent-observatory-cli`.
 
-The terminal cockpit discovers recent local Codex and Claude Code sessions automatically. Press **b** to open the local web dashboard. It listens on `127.0.0.1:14318`.
+The terminal cockpit discovers recent local Codex and Claude Code sessions and reads OpenCode's local database automatically. It starts a local receiver on `127.0.0.1:14318`; you do not need to open a browser or configure an agent to monitor these sessions.
 
 ### Your first minute
 
-1. Open **Agents**. Each row shows the runtime, session ID, repository/project, observed status, last update, any reported wait, and current or last task. Select a session to see its model, usage, and recent work.
-2. Open **MCP Calls** to see servers with observed calls in the selected history scope. Select a server to filter its calls, or inspect a call for recorded arguments, result, duration, and linked trace.
-3. Open **Activity** or **Traces** to follow the work around a call. Select a row and press **Enter** to inspect it; press **e** for a wider view. Press **b** to open the local browser dashboard.
+1. Open **Agents**. Each row shows the runtime, session ID, repository/project, observed status, last update, any reported wait, and current or last task. Select a session for an instant recorded-progress summary, recent work, model, usage, and persisted plan progress when the runtime provides one.
+2. Open **MCP Calls** to see configured servers alongside servers with observed calls in the selected history scope. A configured server with zero calls is listed as configured; Observatory does not probe it or claim it is running. Select a server to filter its calls, or inspect a call for recorded arguments, result, duration, and linked trace.
+3. Open **Activity** or **Traces** to follow the work around a call. Select a row and press **Enter** to inspect it; press **e** for a wider view. **Metrics** lists OTLP instruments, their latest readings, and point attributes. If an agent needs input, Observatory identifies which native agent terminal needs your reply; it does not claim to approve on the agent's behalf.
 
-No sessions yet? Start a local Codex or Claude Code session and perform a task. Observatory discovers supported local session records; it does not attach to every process or infer unrecorded actions. Other runtimes need [instrumentation or OTLP export](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md). The MCP view lists servers with recorded calls, not every server configured on your machine.
+No sessions yet? Start a local Codex, Claude Code, or OpenCode session and perform a task, or enable Gemini CLI's built-in OTLP export as described in the [framework guide](https://github.com/abhishekash/agent-observatory/blob/main/docs/frameworks.md). Observatory discovers supported local session records; it does not attach to every process or infer unrecorded actions. Other runtimes need [instrumentation or OTLP export](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md). MCP configuration discovery reads known Codex, Claude Code, Cursor, Gemini CLI, OpenCode, and VS Code configuration files; it shows names and scope only and does not connect to servers.
 
 ```text
 Codex / Claude Code logs ─┐
-Instrumented agents ─────┼─> local receiver ─> terminal cockpit / web dashboard
-                         └─> local SQLite history
+OpenCode local database ──┼─> local receiver ─> terminal cockpit
+Instrumented agents ──────┘                  └─> local SQLite history
 ```
 
 ### Optional AI session summaries
 
-Summaries are **off by default** and run only when you request one. Configure a compatible Chat Completions endpoint, model, and API key, then use **AI summary** on a selected session. The request contains the task, project, reported state, waiting reason, and recent action headlines; it excludes raw tool payloads, working directories, and hidden reasoning. Headlines can still contain private project details, so review the [data sent and provider setup](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md#optional-ai-summaries) before enabling it.
+Every session has an immediate **Progress summary · recorded activity** with its current status, latest observed action, recorded errors, and next step. It uses no AI call, key, or extra setup; where the agent does not report remaining work, Observatory says so. If `OPENAI_API_KEY` is already set, the optional **AI summary** button reuses it and runs only when requested. Otherwise, the local summary remains available. Review the [data sent and provider setup](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md#optional-ai-summaries) before requesting an AI summary.
 
 Already cloned the repository? Run the installer for your shell:
 
@@ -72,15 +68,13 @@ These install the checkout as an isolated uv tool. Re-run the script after pulli
 
 ## What you get
 
-- **Agents:** one row per discovered session, with session ID, project, observed status, update age, reported wait, and task/details.
-- **Activity:** readable user/assistant messages, shell commands, file changes, browser events, model use, and tool results.
+- **Agents:** one row per discovered session, with session ID, project, observed status, update age, reported wait, task/details, and an immediate recorded-progress summary.
+- **Activity:** readable user/assistant messages, shell commands, file changes, browser events, model use, and tool results. The **Prompts** filter shows only your prompts for the selected agent.
 - **MCP:** observed server inventory and tool calls with readable arguments/results, errors, latency, and direct links to execution spans. Unobserved configured servers are not listed.
 - **Traces:** parent/child spans, model usage, errors, and evidence for each operation.
 - **Host:** known local agent processes and basic resource use, shown separately from sessions.
-- **Web dashboard:** searchable live activity with the same local receiver.
-- **Control:** `agent-observatory` opens one terminal cockpit. Its Control tab starts Codex, Claude Code, or OpenCode from a first-prompt goal, shows live sessions and errors, and handles pending approvals and questions in place. Press **b** only when you want the browser dashboard. [Learn more](docs/usage.md#agent-session-overview).
 
-The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading.
+The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading. Observatory monitors existing sessions and telemetry; start or answer agents in their own terminals.
 
 The receiver stores data in a local SQLite file and listens on `127.0.0.1:14318`. Native session capture is bounded and redacts recognizable credentials on a best-effort basis. Choose metadata-only capture with `--metadata-only`. See [Privacy and capture boundaries](https://github.com/abhishekash/agent-observatory/blob/main/docs/privacy.md).
 
@@ -89,6 +83,7 @@ The receiver stores data in a local SQLite file and listens on `127.0.0.1:14318`
 Send OpenTelemetry traces, logs, and metrics over OTLP/HTTP, or use the Python and JavaScript clients:
 
 - [Python setup and automatic SDK capture](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md)
+- [Connect Pydantic AI, Google ADK, and other OTLP agents](https://github.com/abhishekash/agent-observatory/blob/main/docs/frameworks.md)
 - [Node.js client](https://github.com/abhishekash/agent-observatory/blob/main/docs/javascript.md)
 - [OTLP, receiver, and deployment configuration](https://github.com/abhishekash/agent-observatory/blob/main/docs/receiver.md)
 - [Complete usage guide and examples](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md)

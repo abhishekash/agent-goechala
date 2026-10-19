@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-observatory-cli"
 version = "0.1.2"
-description = "Local terminal and web dashboard for AI agent sessions, MCP calls, OpenTelemetry traces, and errors."
+description = "Terminal-first monitor for AI agent sessions, MCP calls, OpenTelemetry traces, and errors."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing", "mcp", "codex", "claude-code", "opencode"]
+keywords = ["agents", "observability", "opentelemetry", "otlp", "tracing", "mcp", "codex", "claude-code"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -48,8 +48,8 @@ openai-agents = ["openai-agents>=0.1.0,<2"]
 [project.scripts]
 agent-observatory = "observatory.__main__:main"
 
-[tool.setuptools.package-data]
-observatory = ["index.html", "control.html", "setup.js", "setup.css", "activity.js", "activity.css"]
+[tool.setuptools.exclude-package-data]
+observatory = ["*.html", "*.js", "*.css"]
 
 [tool.setuptools.packages.find]
 include = ["observatory*"]

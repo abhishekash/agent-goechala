@@ -14,22 +14,16 @@ def main():
         description="Start the terminal cockpit with no subcommand, or choose a command below.")
     parser.add_argument("--db", default="observatory.db")
     sub = parser.add_subparsers(dest="command")
-    cockpit = sub.add_parser("cockpit", help="one-command terminal dashboard and optional agent launch")
+    cockpit = sub.add_parser("cockpit", help="monitor agent sessions and telemetry in the terminal")
     cockpit.add_argument("--port", type=int, default=14318, help="local receiver port (default: 14318)")
     cockpit.add_argument("--endpoint", default=os.environ.get("OBSERVATORY_ENDPOINT"),
                          help="connect to an existing receiver instead of starting one")
-    cockpit.add_argument("--service", default=os.environ.get("OTEL_SERVICE_NAME", "my-agent"))
-    cockpit.add_argument("--python", help="Python executable in the agent's environment")
-    cockpit.add_argument("--module", action="store_true", help="run the agent as a Python module")
-    cockpit.add_argument("--capture-content", action="store_true", help="include prompts and model responses")
     cockpit.add_argument("--new-window", action="store_true", help="open the cockpit in a new terminal window")
     cockpit.add_argument("--once", action="store_true", help="print one snapshot and exit")
     cockpit.add_argument("--no-local-agents", dest="local_agents", action="store_false",
                          help="disable local Codex / Claude Code session discovery in a receiver started here")
     cockpit.add_argument("--metadata-only", action="store_true", help="omit native session text, commands and outputs")
-    cockpit.add_argument("target", nargs="?", help="optional Python agent script or module to launch")
-    cockpit.add_argument("arguments", nargs=argparse.REMAINDER, help="arguments passed to the agent")
-    server = sub.add_parser("serve", help="run local dashboard and OTLP/HTTP receiver")
+    server = sub.add_parser("serve", help="run the local OTLP/HTTP receiver used by the terminal cockpit")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=4318)
     server.add_argument("--token", default=os.environ.get("OBSERVATORY_TOKEN"),
@@ -44,9 +38,9 @@ def main():
     server.add_argument("--metadata-only", action="store_true", help="omit native session text, commands and outputs")
     launcher = sub.add_parser("run", help="automatically capture model calls from a Python agent")
     launcher.add_argument("--endpoint", default=os.environ.get("OBSERVATORY_ENDPOINT", "http://127.0.0.1:4318"),
-                          help="dashboard address (or OBSERVATORY_ENDPOINT)")
+                          help="receiver address (or OBSERVATORY_ENDPOINT)")
     launcher.add_argument("--service", default=os.environ.get("OTEL_SERVICE_NAME", "my-agent"),
-                          help="name shown in the dashboard")
+                          help="service name shown in Observatory")
     launcher.add_argument("--module", action="store_true", help="run an importable module instead of a script")
     launcher.add_argument("--capture-content", action="store_true", help="include prompts and model responses")
     launcher.add_argument("target", help="your agent's Python script or module")
@@ -58,19 +52,11 @@ def main():
     evaluations.add_argument("path", type=Path)
     prune = sub.add_parser("prune", help="delete telemetry older than the retention period")
     prune.add_argument("--older-than-days", type=float, required=True)
-    codex_control = sub.add_parser("codex-control", help="run a Codex turn with in-dashboard approvals")
-    codex_control.add_argument("--endpoint", default=None)
-    codex_control.add_argument("prompt", help="first prompt and session goal")
-    claude_control = sub.add_parser("claude-control", help="launch Claude Code with in-dashboard approvals")
-    claude_control.add_argument("--endpoint", default=None)
-    claude_control.add_argument("arguments", nargs=argparse.REMAINDER)
-    sub.add_parser("claude-hook", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.command in {None, "cockpit"}:
         from .terminal import CockpitError, run_cockpit
-        options = {key: getattr(args, key) for key in ("port", "endpoint", "service", "python", "module", "capture_content", "new_window", "once", "target", "arguments", "local_agents", "metadata_only")} if args.command else {
+        options = {key: getattr(args, key) for key in ("port", "endpoint", "new_window", "once", "local_agents", "metadata_only")} if args.command else {
             "endpoint": os.environ.get("OBSERVATORY_ENDPOINT"),
-            "service": os.environ.get("OTEL_SERVICE_NAME", "my-agent"),
         }
         try:
             run_cockpit(db_path=args.db, **options)
@@ -98,22 +84,6 @@ def main():
                     except (ValueError, KeyError, TypeError) as exc:
                         parser.error(f"{args.path}:{number}: {exc}")
         print(f"Imported {Store(args.db).ingest(spans)} spans")
-    elif args.command == "codex-control":
-        from .controlled import CodexBridge
-        try:
-            raise SystemExit(CodexBridge(args.prompt, base=args.endpoint).run())
-        except (ValueError, KeyError, OSError) as exc:
-            parser.exit(2, f"Observatory: {exc}\n")
-    elif args.command == "claude-control":
-        from .controlled import launch_claude
-        try:
-            arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
-            raise SystemExit(launch_claude(arguments, base=args.endpoint))
-        except (ValueError, OSError) as exc:
-            parser.exit(2, f"Observatory: {exc}\n")
-    elif args.command == "claude-hook":
-        from .controlled import run_claude_hook
-        run_claude_hook()
     elif args.command == "import-evals":
         payload = json.loads(args.path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
