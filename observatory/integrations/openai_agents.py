@@ -1,4 +1,4 @@
-"""OpenAI Agents SDK tracing exporter for Observatory."""
+"""OpenAI Agents SDK tracing exporter for Goechala."""
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +13,7 @@ try:
 except ImportError as exc:  # pragma: no cover - optional integration dependency
     raise ImportError(
         "OpenAIAgentsExporter requires the optional dependency: "
-        "pip install 'agent-observatory-cli[openai-agents]'"
+        "pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'"
     ) from exc
 
 
@@ -95,7 +95,7 @@ def _bounded_content(value: Any, max_chars: int) -> str:
 
 
 class OpenAIAgentsExporter(TracingExporter):
-    """Export OpenAI Agents SDK spans to an Observatory :class:`Client`.
+    """Export OpenAI Agents SDK spans to an Goechala :class:`Client`.
 
     Pass this exporter to the SDK's ``BatchTraceProcessor`` and register that
     processor with ``agents.tracing.add_trace_processor``. Span input/output
@@ -173,13 +173,13 @@ class OpenAIAgentsExporter(TracingExporter):
 
 def create_processor(client, *, capture_content=False, max_content_chars=4000,
                      **processor_options):
-    """Create the SDK's background batching processor for this Observatory client."""
+    """Create the SDK's background batching processor for this Goechala client."""
     try:
         from agents.tracing.processors import BatchTraceProcessor
     except ImportError as exc:  # pragma: no cover - optional integration dependency
         raise ImportError(
             "create_processor requires the optional dependency: "
-            "pip install 'agent-observatory-cli[openai-agents]'"
+            "pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'"
         ) from exc
     exporter = OpenAIAgentsExporter(client, capture_content=capture_content,
                                     max_content_chars=max_content_chars)

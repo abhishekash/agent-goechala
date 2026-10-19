@@ -1,4 +1,4 @@
-"""Run the published Node client against a real local Observatory receiver."""
+"""Run the published Node client against a real local Goechala receiver."""
 from __future__ import annotations
 
 import json

@@ -1,40 +1,47 @@
-# Investigation video
+# Agent Goechala walkthrough
 
-[Get the full 31-second MP4](https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4)
-or view the [animated README preview](../media/investigation-demo-preview.gif).
+[Watch the 29-second 1080p MP4](../media/goechala-demo.mp4),
+[view the animated README preview](../media/goechala-demo-preview.gif), or
+[open the poster](../media/goechala-demo-poster.png).
 
-The recording shows the actual Agent Observatory terminal UI populated with a
-synthetic example. It contains no real prompts, repositories, or session logs.
-There is no voiceover; all narration is visible on screen.
+This walkthrough uses **actual Textual screenshots of Agent Goechala**, assembled
+into a captioned video. The examples are synthetic. The capture uses an in-memory
+feed: it does not read personal prompts, local agent logs, a receiver, or a real
+database. There is no paid model call or voiceover.
 
 ## Transcript
 
-1. **Find the session.** A Codex session in `sample/payments-api` was asked to
-   investigate a checkout failure in pull request #184. Its latest recorded
-   action is `github / get_pull_request`.
-2. **See the last action.** Activity shows the MCP request failed after 713 ms.
-   A checkout test also failed, but its cause has not been established.
-3. **Read the MCP response.** The observed GitHub tool call returned HTTP 403
-   with `API rate limit exceeded`. The call detail includes its arguments,
-   response, and trace link.
-4. **Follow the trace.** The failed MCP span belongs to the same agent run.
-   The pull request was not inspected; the GitHub access limit must be resolved
-   before the checkout failure can be diagnosed further.
+| Time | On screen | Action |
+| --- | --- | --- |
+| 0–5s | Every session, in one place. | Agents overview with Codex, OpenCode, and Claude Code sessions |
+| 5–10s | Read the prompts behind the work. | Focus the checkout agent and enable the Prompts filter |
+| 10–14s | See which tool call failed. | Inspect the observed MCP call list |
+| 14–20s | Open the evidence. | Expand the failed GitHub request and its indented JSON response |
+| 20–26s | Follow the call into its execution. | Follow the MCP operation to its linked execution tree |
+| 26–29s | Agent Goechala. A clear view of every agent. | Mountain-pass mark and the new command |
+
+The observed request returned HTTP 403, `API rate limit exceeded`. The demo does
+not claim that checkout was fixed: the agent has not yet fetched the pull request.
 
 ## Rebuild
 
 From the repository root, with [uv](https://docs.astral.sh/uv/) installed:
 
-```sh
-uv run python scripts/capture_investigation_video.py --output /tmp/ao-capture
+```bash
+uv run --with cairosvg python scripts/build_brand_assets.py
+uv run python scripts/capture_investigation_video.py --output /tmp/goechala-capture
 uv run --with cairosvg --with pillow --with imageio-ffmpeg \
   python scripts/compose_investigation_video.py \
-  --captures /tmp/ao-capture --output media/investigation-demo.mp4
+  --captures /tmp/goechala-capture --output media/goechala-demo.mp4
 uv run --with imageio-ffmpeg python scripts/make_readme_preview.py \
-  --video media/investigation-demo.mp4 \
-  --output media/investigation-demo-preview.gif
+  --video media/goechala-demo.mp4 --output media/goechala-demo-preview.gif
 ```
 
-The capture script renders a fixed synthetic case in Textual's test driver.
-The composer converts the SVG screenshots into a 1920×1080 H.264 MP4 and
-poster PNG. The local receiver and its database are not used.
+The capture script drives the actual TUI through its keyboard actions and
+Prompts button, and also captures an 80 × 24 terminal. The composer streams
+1920 × 1080 frames to H.264 rather than retaining a video in memory. Its source
+screens are exported to `media/screenshots/`. Fonts use DejaVu Sans and DejaVu
+Sans Mono; install those fonts before reproducing the raster/video assets.
+
+The source SVG identity lives in `media/brand/`. Its two ridges, open pass,
+golden path, and Alpine Night palette are described in [branding.md](branding.md).

@@ -1,6 +1,6 @@
 # Connect agent frameworks
 
-Agent Observatory combines local session records with telemetry emitted by an
+Agent Goechala combines local session records with telemetry emitted by an
 agent runtime. The collection path determines what can be shown; it does not
 guess actions that the runtime never recorded.
 
@@ -8,9 +8,9 @@ guess actions that the runtime never recorded.
 
 | Path | Runtimes | Captures |
 |---|---|---|
-| Local session discovery | Codex CLI and Claude Code | Session/task state and the events present in their local records. Observatory does not attach to arbitrary processes. |
+| Local session discovery | Codex CLI and Claude Code | Session/task state and the events present in their local records. Goechala does not attach to arbitrary processes. |
 | Local database discovery | OpenCode | Read-only recent session metadata, assistant-turn model/token spans, recorded tool parts, and progress from its persisted task checklist. Reasoning parts are excluded; task text and tool payloads follow the local content-capture setting. |
-| Python auto capture | OpenAI Python SDK, Anthropic Python SDK, and LangChain SDKs launched through `agent-observatory run` | OpenInference model and framework spans; content is omitted by default. |
+| Python auto capture | OpenAI Python SDK, Anthropic Python SDK, and LangChain SDKs launched through `agent-goechala run` | OpenInference model and framework spans; content is omitted by default. |
 | Python adapters | LangChain callback handler and OpenAI Agents SDK exporter | Framework spans, model usage when supplied, tool activity, errors, and optional progress/content according to each adapter. |
 | OTLP | Any language or agent able to export OTLP/HTTP traces, logs, or metrics | The fields the producer emits. GenAI semantic attributes are normalized into model, token, tool, MCP, and session details when present. |
 | Gemini CLI | Built-in OpenTelemetry export over OTLP/HTTP | Traces, logs, metrics, token usage, run lifecycle, file/tool activity, and MCP calls; session rows are grouped from `session.id` telemetry without wrapper code or private log scraping. |
@@ -43,14 +43,14 @@ connection shutdown. The test sends no model requests over the network.
 The default terminal cockpit starts its receiver on port `14318`:
 
 ```bash
-agent-observatory
+agent-goechala
 ```
 
 Alternatively, run the OTLP receiver directly. `serve` defaults
 to port `4318`:
 
 ```bash
-agent-observatory serve
+agent-goechala serve
 ```
 
 Use the port for the receiver you started. Keep it on loopback for local use.
@@ -92,8 +92,8 @@ finally:
 ```
 
 If the application already configures a global `TracerProvider`, add the
-Observatory `BatchSpanProcessor` to that provider instead of replacing it.
-Pydantic AI controls which span attributes it emits; Observatory only displays
+Goechala `BatchSpanProcessor` to that provider instead of replacing it.
+Pydantic AI controls which span attributes it emits; Goechala only displays
 the telemetry it receives.
 
 CI runs an offline Pydantic AI agent through a fake model and a real local OTLP
@@ -127,15 +127,15 @@ maybe_set_otel_providers()
 ```
 
 ADK trace export supplies spans. Configure its logs or metrics exporters
-separately if you want those signals in Observatory too.
+separately if you want those signals in Goechala too.
 
 CI runs an ADK `InMemoryRunner` with a local fake model and a real stdio MCP
 fixture against the receiver. It verifies invocation/model/tool spans, session
 grouping, token totals, and that MCP initialization and tool discovery are not
 counted as tool calls. ADK emits token usage on both a wrapper span and its
-nested model span; Observatory counts the nested model calls once in run totals
+nested model span; Goechala counts the nested model calls once in run totals
 while retaining every span in trace details. ADK's MCP spans currently identify
-the called tool but omit the configured MCP server name, so Observatory shows
+the called tool but omit the configured MCP server name, so Goechala shows
 `Not reported` for that server unless another emitted span or log supplies it.
 
 ## OpenCode local sessions
@@ -149,7 +149,7 @@ normalized into the session list and trace view. Reasoning parts are excluded.
 The session label uses the database's last-update time; this is activity
 recency, not proof that a process is currently running. No approval/user-input
 wait is inferred when OpenCode has not recorded one in a supported field.
-When OpenCode has persisted a todo checklist, Observatory shows its completed,
+When OpenCode has persisted a todo checklist, Goechala shows its completed,
 in-progress, and pending steps as trace progress with a completion percentage.
 Tool inputs and results are captured only when native content capture is
 enabled; `--metadata-only` retains tool identity and status but omits payloads
@@ -167,7 +167,7 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_SERVICE_NAME=my-agent
 ```
 
-For a standalone `agent-observatory serve` using its default port, replace
+For a standalone `agent-goechala serve` using its default port, replace
 `14318` with `4318`. OTLP/HTTP uses `/v1/traces`, `/v1/logs`, and `/v1/metrics`;
 the general endpoint above lets standard exporters append those paths.
 
@@ -180,7 +180,7 @@ Useful attributes include:
 - `agent.progress.stage`, `agent.progress.message`, and optional
   `agent.progress.percent` on a correlated `agent.progress` log record
 
-Unknown fields stay unknown. Observatory does not infer token counts, progress,
+Unknown fields stay unknown. Goechala does not infer token counts, progress,
 MCP server identity, or cost when the producer omits them.
 An explicitly reported token count of `0` remains a real zero; absent input or
 output token attributes are marked **Not reported** in trace and session totals.
@@ -211,7 +211,7 @@ and results out of telemetry. See the
 
 ## Gemini CLI
 
-Gemini CLI has built-in OpenTelemetry export. Start the Observatory cockpit, then
+Gemini CLI has built-in OpenTelemetry export. Start the Goechala cockpit, then
 configure `.gemini/settings.json` in your project to send OTLP/HTTP to its default
 local receiver port:
 
@@ -246,14 +246,14 @@ the same receiver normalization and stored MCP/activity queries used by the UI.
 Cursor's Enterprise OpenTelemetry Export is configured by a team admin under
 **Team Settings → OpenTelemetry Export**. It sends OTLP/HTTP protobuf metrics
 and logs to an HTTPS endpoint reachable by Cursor's servers. The default local
-Observatory receiver is loopback-only and has no TLS or authentication, so it
+Goechala receiver is loopback-only and has no TLS or authentication, so it
 cannot be used as Cursor's direct destination. Put an authenticated HTTPS
 collector or gateway in front of the receiver and keep its network access
 restricted; do not expose the local receiver directly to the internet.
 
 Set the destination base URL (without `/v1`), configure the auth header, and
 enable the desired signal families. Cursor appends `/v1/metrics` and `/v1/logs`.
-The team must have Cursor Enterprise. In Observatory, session rows use
+The team must have Cursor Enterprise. In Goechala, session rows use
 `cursor.conversation.id`; `cursor.api.request` events supply model and token
 counts, and `cursor.grok_bot.mcp_tool_call` appears in Activity and MCP Calls
 when Cursor Action Recording is enabled. Cached read and cache creation tokens
@@ -267,7 +267,7 @@ Cursor does not export traces or span context, so these sessions have activity
 and usage without fabricated traces. Its token/tool/cost metrics are delta
 aggregates with no session IDs; they appear in Metrics and cannot be assigned
 to individual conversations. Conversation messages and MCP arguments/results
-are off by default in Cursor. Observatory displays them only if the team
+are off by default in Cursor. Goechala displays them only if the team
 explicitly enables Cursor's `conversation_content` family and emits those logs;
 review Cursor's [privacy and wire-format documentation](https://prod.cursor.com/docs/enterprise/opentelemetry-export)
 before enabling that family. Log retries are deduplicated using

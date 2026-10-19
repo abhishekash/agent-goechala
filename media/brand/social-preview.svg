@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+<title id="title">Agent Goechala social card</title>
+<desc id="desc">Two cyan mountain ridges frame a pass. A golden path leads through the saddle toward a warm sunrise.</desc>
+
+<rect width="1280" height="640" fill="#08121f"/>
+<g transform="translate(470 22) scale(.66)">
+  <path d="M80 354 182 156 256 278 334 194 432 354Z" fill="#173148"/>
+  <path d="m80 354 102-198 74 122 78-84 98 160" fill="none" stroke="#73dce8" stroke-width="21" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m182 156 17 89 57 33M334 194l-16 91-62-7" fill="none" stroke="#3b7b91" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="260" cy="178" r="21" fill="#ffd08a"/>
+  <path d="m224 412 66-48-48-39 18-47" fill="none" stroke="#ffd08a" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="224" cy="412" r="8" fill="#f2f7fa"/>
+</g>
+<text x="640" y="428" fill="#f2f7fa" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="62">Agent Goechala</text>
+<text x="640" y="488" fill="#73dce8" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
+<text x="640" y="568" fill="#9aafc3" text-anchor="middle" font-family="DejaVu Sans Mono,monospace" font-size="17">LOCAL OBSERVABILITY  /  RIGHT IN YOUR TERMINAL</text>
+
+</svg>

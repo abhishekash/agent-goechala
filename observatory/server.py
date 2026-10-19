@@ -58,7 +58,7 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                 return
             path = route.path
             if path == "/":
-                data = ("Agent Observatory is terminal-first. Run `agent-observatory` in a terminal "
+                data = ("Agent Goechala is terminal-first. Run `agent-goechala` in a terminal "
                         "to monitor local sessions. This HTTP service receives OTLP and serves the local API.\n").encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -317,7 +317,7 @@ def serve(db_path="observatory.db", host="127.0.0.1", port=4318, token=None,
     store.local_agent_monitor = local
     watch = start_watchers(store, watch_jsonl, watch_service) if watch_jsonl else None
     maintenance = _start_retention(store, retention_days) if retention_days is not None else None
-    print(f"Observatory receiver listening at http://{host}:{server.server_port} (database: {db_path})", flush=True)
+    print(f"Goechala receiver listening at http://{host}:{server.server_port} (database: {db_path})", flush=True)
     if local:
         print("Watching local Codex / Claude Code sessions · " + ("metadata only" if metadata_only else "activity and bounded, redacted content"), flush=True)
     try:

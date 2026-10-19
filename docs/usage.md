@@ -2,14 +2,14 @@
 
 Shows agent and session IDs, repo/project, lifecycle status, update age, pending wait, and task details. MCP server calls now link across start/result events, expose qualified Claude Code and Codex tool names, report completion/error status, and include all stored history in server counts. Optional provider-backed session summaries run only when requested. DuckDB guidance is in [the storage evaluation](decisions/duckdb.md).
 
-# Agent Observatory
+# Agent Goechala
 
 A terminal-first monitor and local telemetry receiver for AI agents. It discovers supported local agent sessions, then accepts **OTLP/HTTP traces, logs, and metrics in protobuf or JSON** from instrumented runtimes and the existing **agent-harness JSONL** format. The terminal cockpit shows agents, activity, MCP calls, traces, host processes, and metrics. Data lives in SQLite. The receiver uses Python's standard library (3.11+); the terminal UI uses Textual.
 
 ## GitHub Copilot CLI telemetry
 
 Copilot CLI can send its built-in OpenTelemetry traces and metrics directly to
-the cockpit receiver. Start `agent-observatory` in one terminal, then launch
+the cockpit receiver. Start `agent-goechala` in one terminal, then launch
 Copilot CLI from the project in another:
 
 ```bash
@@ -35,20 +35,20 @@ describe the emitted signals and optional content capture.
 Python 3.11+ is required. Install the CLI in an isolated environment with [uv tools](https://docs.astral.sh/uv/guides/tools/):
 
 ```bash
-uv tool install agent-observatory-cli
-agent-observatory
+uv tool install --force git+https://github.com/abhishekash/agent-goechala
+agent-goechala
 ```
 
-If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install agent-observatory-cli`.
+If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install "agent-goechala @ git+https://github.com/abhishekash/agent-goechala"`.
 
-The cockpit opens a tabbed interface for Agents, Activity, MCP Calls, Traces, Host, Metrics, and Findings. The Agents view shows individual sessions, tasks, models, recent work, and an immediate recorded-progress summary. Findings provides a searchable, paged review queue with occurrence counts, evidence links, and direct navigation to the source trace. Session counts and live process counts are separate; approval reviews are hidden by default. The cockpit attaches to a receiver on **127.0.0.1:14318**, or starts one there. Run `agent-observatory` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
+The cockpit opens a tabbed interface for Agents, Activity, MCP Calls, Traces, Host, Metrics, and Findings. The Agents view shows individual sessions, tasks, models, recent work, and an immediate recorded-progress summary. Findings provides a searchable, paged review queue with occurrence counts, evidence links, and direct navigation to the source trace. Session counts and live process counts are separate; approval reviews are hidden by default. The cockpit attaches to a receiver on **127.0.0.1:14318**, or starts one there. Run `agent-goechala` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
 
 ### Existing Codex and Claude Code agents
 
 Local receivers automatically discover recent session files under `~/.codex/sessions` and `~/.claude/projects` (`CODEX_HOME` and `CLAUDE_CONFIG_DIR` are respected). Start the monitor with no agent filename or Python environment flags:
 
 ```bash
-agent-observatory
+agent-goechala
 ```
 
 It reads actual logged activity as files update, including already running sessions. Agents need no restart or configuration change. Source logs stay untouched. Select an agent to see a zero-setup progress summary and its recent activity. When a session explicitly asks for a user reply or approval, the monitor points you to that agent's own terminal; it cannot submit the answer or approve actions for the agent.
@@ -88,7 +88,7 @@ most recently updated sessions from the last 24 hours, up to 30 assistant
 messages per session, 200 tool parts per message, and 100 checklist items per
 session. OpenCode's internal schema
 can change; use OTLP for a stable cross-version integration. Its session label
-is based on database update recency, not proof of a live process; Observatory
+is based on database update recency, not proof of a live process; Goechala
 does not infer a waiting-for-approval state from inactivity.
 
 ### Optional Python SDK capture
@@ -96,11 +96,11 @@ does not infer a waiting-for-approval state from inactivity.
 Native session discovery is automatic for supported local agents. For another Python agent, automatic SDK capture is a separate command-line workflow; the monitoring cockpit itself does not launch agents. Install the capture extra into the agent's environment:
 
 ```bash
-uv pip install --python .venv/bin/python 'agent-observatory-cli[auto]'
-agent-observatory run --endpoint http://127.0.0.1:14318 --service my-agent agent.py
+uv pip install --python .venv/bin/python 'agent-goechala[auto] @ git+https://github.com/abhishekash/agent-goechala'
+agent-goechala run --endpoint http://127.0.0.1:14318 --service my-agent agent.py
 ```
 
-Replace the environment path, service name, and agent filename with your own. Arguments after `agent.py` go to the script; `--module` runs a Python module. If Observatory is already installed in the active agent environment, use `python -m observatory run --endpoint http://127.0.0.1:14318 --service my-agent agent.py`.
+Replace the environment path, service name, and agent filename with your own. Arguments after `agent.py` go to the script; `--module` runs a Python module. If Goechala is already installed in the active agent environment, use `python -m observatory run --endpoint http://127.0.0.1:14318 --service my-agent agent.py`.
 
 This launcher runs the selected script in that terminal and is intended for SDKs not already captured from local session records. Existing processes can send OTLP telemetry to the receiver. Python SDK prompts and responses are omitted unless you add `--capture-content`. Native session capture has its own `--metadata-only` receiver setting.
 
@@ -108,7 +108,7 @@ Use the mouse or **1–7** to switch views. **↑/↓** selects a table row; its
 
 Each view has its own search field and result count directly above its rows. Search in Agents filters sessions by task, project, model, runtime, or session ID. Activity, MCP Calls, and Traces query their own records; Host filters the process list; Metrics filters OTLP instruments by name, service, kind, unit, or description; Findings searches severity, finding type, task, and evidence text in the current page. Findings are global across sessions and can be paged with **Older**, **Newer**, and **Latest**. The Metrics view shows the latest stored point for each instrument with its value, unit, point attributes, resource attributes, and data. Select an instrument to load its latest 100 points; points with OTLP exemplars can open the linked trace with **t** or **Open exemplar**. It loads up to 500 catalog entries and 200 recent points for the overview, refreshing this inventory every three seconds. The session Scope control filters Metrics by the selected session's service; metric points are not attributed to individual sessions unless the telemetry itself includes that association. Filters stay with their view when switching tabs. A task search in Agents does not hide MCP calls or reduce the selected agent's recent-work feed. **Clear** resets that view's query; the session Scope control applies across views. Overview counters retain the inventory for the selected session scope. The **Errors** button in Activity and MCP Calls filters failures within the current results; it does not change the inventory counts. **a** also resets these error filters. Tables resize their columns to the terminal, preserve the selected record, and keep latency and status visible. Inspectors wrap long text to the panel width.
 
-MCP shows reported servers, tools or methods, state, duration, arguments/results and trace/span IDs. It includes protocol methods such as `tools/call`, `tools/list`, `resources/read`, and `prompts/get` when telemetry records them. Calls without a reported server remain visible under **Not reported**; Observatory does not guess their server. Tool execution spans are joined to transport calls to fill in arguments or results when the transport span omits them. Explicit MCP `isError` results mark the run and call as failed, appear in error filters, and create an evidence-linked finding even when the producing span has no error status. The trace view shows a parent-linked span tree; unknown durations remain “not reported”. “Error” describes recorded errors within a trace; “Active · errors” means a logged active turn also contains an error. Agent “Recent/Idle” states describe observed session activity. Live process counts exclude zombie/exited states and do not claim a session-to-PID mapping.
+MCP shows reported servers, tools or methods, state, duration, arguments/results and trace/span IDs. It includes protocol methods such as `tools/call`, `tools/list`, `resources/read`, and `prompts/get` when telemetry records them. Calls without a reported server remain visible under **Not reported**; Goechala does not guess their server. Tool execution spans are joined to transport calls to fill in arguments or results when the transport span omits them. Explicit MCP `isError` results mark the run and call as failed, appear in error filters, and create an evidence-linked finding even when the producing span has no error status. The trace view shows a parent-linked span tree; unknown durations remain “not reported”. “Error” describes recorded errors within a trace; “Active · errors” means a logged active turn also contains an error. Agent “Recent/Idle” states describe observed session activity. Live process counts exclude zombie/exited states and do not claim a session-to-PID mapping.
 
 The view polls about once a second and preserves the event being read as new records arrive. Activity, MCP Calls, and Traces have **Older**, **Newer**, and **Latest** controls (shortcuts **]**, **[**, and **l**) to browse saved records in pages of 200 events, 100 MCP calls, or 100 traces. Search and scope changes return that view to its latest matching page. Activity history includes saved logs beyond a trace's preview window. The selected trace initially shows 100 spans; related-trace navigation also loads its exact target span and up to eight missing ancestors. MCP overview counts cover the latest loaded operations in scope. Global token totals include stored history and repeated/cached context; costs remain unreported when telemetry has no price. History controls require the updated receiver; if a separate receiver is already running, restart it after updating.
 
@@ -120,18 +120,18 @@ Quitting closes only the cockpit and any receiver it started. Agents and separat
 
 ```bash
 # Connect to an existing receiver without starting one:
-agent-observatory cockpit --endpoint http://127.0.0.1:14318
+agent-goechala cockpit --endpoint http://127.0.0.1:14318
 # Print a snapshot for shell use:
-agent-observatory cockpit --endpoint http://127.0.0.1:14318 --once
+agent-goechala cockpit --endpoint http://127.0.0.1:14318 --once
 # Reinstall after updating this checkout:
-uv tool install --reinstall ./agent-observatory
+uv tool install --reinstall ./agent-goechala
 ```
 
 The current terminal is the default. Add `--new-window` only when you want a separate graphical terminal (Terminal on macOS; GNOME Terminal, Konsole, or x-terminal-emulator/xterm on Linux; Windows Terminal on Windows). In SSH or headless sessions, use the default. The Textual interface supports Linux, macOS and Windows terminals without a curses dependency.
 
 ## Capture an agent without changing its code
 
-For Python agents that use supported model SDKs, install the automatic capture extra and run `agent-observatory run` from the agent's own environment. This is a separate terminal command; the monitoring cockpit remains read-only and does not start or control an agent.
+For Python agents that use supported model SDKs, install the automatic capture extra and run `agent-goechala run` from the agent's own environment. This is a separate terminal command; the monitoring cockpit remains read-only and does not start or control an agent.
 
 For example, start a persistent local receiver on port 14318:
 
@@ -166,12 +166,12 @@ python -m pip install '.[auto]' 'openai>=3' 'anthropic>=1.8' langchain-core
 python -m observatory run --endpoint http://127.0.0.1:14318 --service local-capture-demo examples/automatic_capture_demo.py
 ```
 
-The replay uses the current SDKs' `httpx2` mock transport and records an OpenAI call inside a LangChain runnable, an async OpenAI stream, an Anthropic message, and an expected error. All model responses are local replay data. Telemetry goes only to your selected Observatory receiver.
+The replay uses the current SDKs' `httpx2` mock transport and records an OpenAI call inside a LangChain runnable, an async OpenAI stream, an Anthropic message, and an expected error. All model responses are local replay data. Telemetry goes only to your selected Goechala receiver.
 
 ## Run
 
 ```bash
-cd agent-observatory
+cd agent-goechala
 python3 -m observatory --db ./observatory.db serve
 # The root address is a plain-text receiver status page; use the terminal cockpit to inspect activity.
 ```
@@ -204,7 +204,7 @@ To watch a live harness run, pass its trace file to the server. New finished spa
 python3 -m observatory --db ./observatory.db serve --watch-jsonl /path/to/live-trace.jsonl
 ```
 
-For a shared local relay, start the [OpenTelemetry Collector Contrib](https://github.com/open-telemetry/opentelemetry-collector-contrib) distribution with `otelcol-contrib --config ./examples/otel-collector-config.yaml`. This sample accepts OTLP/gRPC on `127.0.0.1:4317` and OTLP/HTTP on `127.0.0.1:4319`, detects host name, architecture, and OS attributes, then batches traces, logs, and metrics to Observatory on port 4318. Point SDKs at the relay with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317` and `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, or use the HTTP listener with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4319` and `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. The sample binds to loopback; change the receiver endpoints only when the network path is protected.
+For a shared local relay, start the [OpenTelemetry Collector Contrib](https://github.com/open-telemetry/opentelemetry-collector-contrib) distribution with `otelcol-contrib --config ./examples/otel-collector-config.yaml`. This sample accepts OTLP/gRPC on `127.0.0.1:4317` and OTLP/HTTP on `127.0.0.1:4319`, detects host name, architecture, and OS attributes, then batches traces, logs, and metrics to Goechala on port 4318. Point SDKs at the relay with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317` and `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, or use the HTTP listener with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4319` and `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. The sample binds to loopback; change the receiver endpoints only when the network path is protected.
 
 Send OTLP/HTTP traces from another agent runtime to `http://127.0.0.1:4318/v1/traces`, logs to `/v1/logs`, and metrics to `/v1/metrics`. Standard HTTP/protobuf exporters use `Content-Type: application/x-protobuf`; HTTP/JSON exporters use `application/json`. Gzip request bodies are accepted. For a typical SDK, set `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` and `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. The receiver keeps trace parent IDs, attributes, events, links, resource attributes, instrumentation scope name, and status. Its endpoint inventory groups spans, logs, and metrics by `host.id`, `host.name`, `device.id`, or `service.instance.id` when producers include those resource attributes; it reports OS, architecture, user, environment, services, last seen time, and linked trace counts. Logs with a valid trace ID appear alongside that trace; `agent.progress` log events with `agent.progress.stage` and optional `agent.progress.percent` attributes also appear in its progress list; `event.name` and the equivalent `progress.*` fields are accepted as aliases. Gauge, sum, histogram, exponential histogram, and summary metric points retain their type, timestamp, attributes, unit, and available value or distribution fields, including the sum monotonicity flag that distinguishes counters from up/down sums; no-recorded-value points remain visible as missing readings and are excluded from charts. Cursor MCP aggregate metrics stay separate from recorded calls: delta counts are summed, while cumulative counters use the latest point per attribute/resource series, including after resets. `service.name` identifies each producer. Token counts use `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, the harness's `llm.usage.*` fields, and OpenInference `llm.token_count.prompt` / `llm.token_count.completion`; OpenInference LLM and embedding model names, indexed chat messages, and embedding input/vector summaries are also recognized. Cache read/write input counts and reasoning output counts are retained as breakdowns when reported; these are subsets of headline totals and are not added a second time. Cost totals accept `llm.cost.total`, the prompt/completion cost components, and the existing harness aliases. Unknown prices are shown as unknown, rather than zero cost. See the [OTLP exporter protocol configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/) for SDK settings.
 
@@ -246,7 +246,7 @@ npm install ./clients/javascript
 ```
 
 ```js
-import { Client } from '@agent-observatory/client';
+import { Client } from '@agent-goechala/client';
 
 const telemetry = new Client({
   service: 'javascript-research-agent',
@@ -271,10 +271,10 @@ Nested spans follow asynchronous execution context, including spans started insi
 For automatic callback capture in LangChain and LangGraph, install the optional adapter:
 
 ```bash
-pip install 'agent-observatory-cli[langchain]'
+pip install 'agent-goechala[langchain] @ git+https://github.com/abhishekash/agent-goechala'
 ```
 
-Attach the handler inside an Observatory run and pass it through the runnable config. It records nested chain, model, tool, and retriever spans; captures standardized token usage when the model supplies it; records errors; and maps LangChain custom callbacks named `progress`, `agent.progress`, or `langgraph.progress` into the run timeline. LangGraph applications that use custom stream output can call `run.aprogress(...)` as they consume those events. Prompts, tool inputs, and outputs stay out of telemetry unless `capture_content=True` is set.
+Attach the handler inside an Goechala run and pass it through the runnable config. It records nested chain, model, tool, and retriever spans; captures standardized token usage when the model supplies it; records errors; and maps LangChain custom callbacks named `progress`, `agent.progress`, or `langgraph.progress` into the run timeline. LangGraph applications that use custom stream output can call `run.aprogress(...)` as they consume those events. Prompts, tool inputs, and outputs stay out of telemetry unless `capture_content=True` is set.
 
 ```python
 from observatory import Client
@@ -290,7 +290,7 @@ with telemetry.trace(task="Research a question", session_id="thread-42") as run:
 For the OpenAI Agents SDK, install its optional exporter and add the batching processor to the SDK tracing provider:
 
 ```bash
-pip install 'agent-observatory-cli[openai-agents]'
+pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'
 ```
 
 ```python
@@ -306,7 +306,7 @@ result = await Runner.run(agent, "Help me find my order")
 flush_traces()  # optional: make the spans visible immediately
 ```
 
-The adapter keeps parent/child relationships and model or token metadata when available, including cache read/write and reasoning usage details. It maps SDK IDs to stable Observatory IDs, maps trace `group_id` to Observatory session grouping, and records original trace/span IDs as attributes for correlation. Prompt, tool input/output, and arbitrary trace metadata are omitted by default. To collect span input/output, opt in with `create_processor(telemetry, capture_content=True)`; content is truncated to 4,000 characters per field by default and can be adjusted with `max_content_chars`. Token totals come from generation spans, avoiding double counting the SDK's aggregate turn usage. The SDK batching processor exports in the background; call `flush_traces()` when a job needs immediate visibility. `set_trace_processors` replaces the SDK's default OpenAI exporter. If you use `add_trace_processor` to keep that exporter too, the SDK also sends its full trace payloads to OpenAI.
+The adapter keeps parent/child relationships and model or token metadata when available, including cache read/write and reasoning usage details. It maps SDK IDs to stable Goechala IDs, maps trace `group_id` to Goechala session grouping, and records original trace/span IDs as attributes for correlation. Prompt, tool input/output, and arbitrary trace metadata are omitted by default. To collect span input/output, opt in with `create_processor(telemetry, capture_content=True)`; content is truncated to 4,000 characters per field by default and can be adjusted with `max_content_chars`. Token totals come from generation spans, avoiding double counting the SDK's aggregate turn usage. The SDK batching processor exports in the background; call `flush_traces()` when a job needs immediate visibility. `set_trace_processors` replaces the SDK's default OpenAI exporter. If you use `add_trace_processor` to keep that exporter too, the SDK also sends its full trace payloads to OpenAI.
 
 For custom runtimes that cannot export OTLP yet, POST an array to `/api/spans` using the harness fields `trace_id`, `span_id`, `parent_span_id`, `name`, `start_unix_nano`, `end_unix_nano`, `status`, `attributes`, and `events`. Wrap it in `{"service":"my-agent","spans":[...]}` to label the producer. Repeated `(trace_id, span_id)` pairs update the stored span.
 
@@ -338,7 +338,7 @@ python3 -m unittest discover -s tests -v
 
 ## Current boundaries
 
-This is a working local vertical slice, not an Origin equivalent. Automatic capture covers the supported Python SDKs run through the separate `run` command; existing processes need OTLP export or restart through that launcher. Other runtimes can send OTLP or use the clients. Managed endpoint collector deployment remains manual, and endpoint inventory depends on host identity resource attributes. It also does not provide team access controls. Session grouping depends on IDs emitted by the producer. Retention is optional and local; it needs operational validation under sustained ingestion. Findings use a small deterministic ruleset and need broader validation before operational use. Run counters are derived from stored spans; native metric points are shown separately without unsafe aggregation across metric kinds or temporalities. Progress can come from an explicit API event or a correlated `agent.progress` OTLP log. Summary metrics have no OTLP temporality field; Observatory marks their count and sum as implicitly cumulative. The protobuf decoder supports the OTLP fields displayed or stored here and skips unknown fields; it is not a general protobuf decoder. Metric exemplars link measurements back to their source trace and span when those IDs are present; histogram bucket charts show one latest distribution point for the selected instrument, with its source attributes shown.
+This is a working local vertical slice, not an Origin equivalent. Automatic capture covers the supported Python SDKs run through the separate `run` command; existing processes need OTLP export or restart through that launcher. Other runtimes can send OTLP or use the clients. Managed endpoint collector deployment remains manual, and endpoint inventory depends on host identity resource attributes. It also does not provide team access controls. Session grouping depends on IDs emitted by the producer. Retention is optional and local; it needs operational validation under sustained ingestion. Findings use a small deterministic ruleset and need broader validation before operational use. Run counters are derived from stored spans; native metric points are shown separately without unsafe aggregation across metric kinds or temporalities. Progress can come from an explicit API event or a correlated `agent.progress` OTLP log. Summary metrics have no OTLP temporality field; Goechala marks their count and sum as implicitly cumulative. The protobuf decoder supports the OTLP fields displayed or stored here and skips unknown fields; it is not a general protobuf decoder. Metric exemplars link measurements back to their source trace and span when those IDs are present; histogram bucket charts show one latest distribution point for the selected instrument, with its source attributes shown.
 
 ## Workspace integration check
 
@@ -395,13 +395,13 @@ Unavailable totals are sent as unknown rather than zero. Raw tool payloads, work
 excluded. Recognizable secrets are redacted, but task/headline text may still contain
 private project information. Only enable this with a provider appropriate for that data.
 
-For another OpenAI-compatible provider, set these in the terminal that launches Observatory:
+For another OpenAI-compatible provider, set these in the terminal that launches Goechala:
 
 ```sh
 export OBSERVATORY_SUMMARY_URL='https://api.openai.com/v1/chat/completions'
 export OBSERVATORY_SUMMARY_MODEL='YOUR_MODEL_ID'
 # The existing OPENAI_API_KEY is reused unless OBSERVATORY_SUMMARY_KEY_ENV selects another variable.
-agent-observatory
+agent-goechala
 ```
 
 The URL is the full **Chat Completions** endpoint, and the model must be available to

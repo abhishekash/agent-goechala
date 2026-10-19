@@ -11,7 +11,7 @@ npm install ./clients/javascript
 Example:
 
 ```js
-import { Client } from '@agent-observatory/client';
+import { Client } from '@agent-goechala/client';
 
 const telemetry = new Client({ service: 'javascript-research-agent' });
 await telemetry.trace(

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Agent Observatory. For bugs and feature ideas, open a GitHub issue with the expected behavior and a minimal reproduction when possible.
+Thanks for helping improve Agent Goechala. For bugs and feature ideas, open a GitHub issue with the expected behavior and a minimal reproduction when possible.
 
 ## Local development
 
@@ -25,3 +25,7 @@ uv run --with cairosvg --with pillow python scripts/render_terminal_demo.py --sn
 ```
 
 This writes the five-view GIF to `media/terminal-demo.gif` and optional wide/compact PNGs to the supplied directory. It uses Textual's headless renderer and never connects to a receiver. Review the previews when changing layout; keep real telemetry out of demo media.
+
+## Brand and demo assets
+
+The SVG mountain-pass identity, color palette, and raster exports are documented in [docs/branding.md](docs/branding.md). Reproduce the README video and keyboard-driven TUI captures with [docs/investigation-video.md](docs/investigation-video.md). Use only synthetic records for public media.

@@ -1,13 +1,15 @@
 # Publishing to PyPI
 
-The Python distribution is named `agent-observatory-cli`; the installed command remains `agent-observatory`.
+The Python distribution and installed command are named `agent-goechala`. The former `agent-observatory` command remains a compatibility alias.
+
+The rename does not publish a new package automatically. Register the new pending publisher below before tagging the first renamed release. Existing publishers for `agent-observatory-cli` do not authorize this new distribution.
 
 ## First release
 
 1. On PyPI, open **Account settings → Publishing** and add a pending GitHub Actions publisher:
-   - PyPI project: `agent-observatory-cli`
+   - PyPI project: `agent-goechala`
    - Owner: `abhishekash`
-   - Repository: `agent-observatory`
+   - Repository: `agent-goechala`
    - Workflow: `publish.yml`
    - Environment: `pypi`
 2. Push the version tag after the workflow changes are on `main`:

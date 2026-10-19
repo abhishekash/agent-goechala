@@ -1,4 +1,4 @@
-"""Verify OpenAI Agents SDK tracing reaches the local Observatory receiver."""
+"""Verify OpenAI Agents SDK tracing reaches the local Goechala receiver."""
 from __future__ import annotations
 
 import tempfile

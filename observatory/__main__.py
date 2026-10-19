@@ -10,7 +10,7 @@ from .server import serve
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="python -m observatory",
+    parser = argparse.ArgumentParser(prog="agent-goechala",
         description="Start the terminal cockpit with no subcommand, or choose a command below.")
     parser.add_argument("--db", default="observatory.db")
     sub = parser.add_subparsers(dest="command")
@@ -40,7 +40,7 @@ def main():
     launcher.add_argument("--endpoint", default=os.environ.get("OBSERVATORY_ENDPOINT", "http://127.0.0.1:4318"),
                           help="receiver address (or OBSERVATORY_ENDPOINT)")
     launcher.add_argument("--service", default=os.environ.get("OTEL_SERVICE_NAME", "my-agent"),
-                          help="service name shown in Observatory")
+                          help="service name shown in Goechala")
     launcher.add_argument("--module", action="store_true", help="run an importable module instead of a script")
     launcher.add_argument("--capture-content", action="store_true", help="include prompts and model responses")
     launcher.add_argument("target", help="your agent's Python script or module")
@@ -61,7 +61,7 @@ def main():
         try:
             run_cockpit(db_path=args.db, **options)
         except CockpitError as exc:
-            parser.exit(2, f"Observatory: {exc}\n")
+            parser.exit(2, f"Goechala: {exc}\n")
     elif args.command == "serve":
         serve(args.db, args.host, args.port, args.token, args.watch_jsonl,
               args.watch_service, args.retention_days, args.local_agents, args.metadata_only)
@@ -71,7 +71,7 @@ def main():
             run_agent(args.target, args.arguments, endpoint=args.endpoint, service=args.service,
                       module=args.module, capture_content=args.capture_content)
         except SetupError as exc:
-            parser.exit(2, f"Observatory: {exc}\n")
+            parser.exit(2, f"Goechala: {exc}\n")
         except KeyboardInterrupt:
             parser.exit(130)
     elif args.command == "import-jsonl":

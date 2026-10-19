@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agent-observatory-cli"
+name = "agent-goechala"
 version = "0.1.2"
 source = { editable = "." }
 dependencies = [

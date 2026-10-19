@@ -23,7 +23,7 @@ def _random_hex(byte_count):
 
 
 class Client:
-    """Emit framework-neutral spans and progress to an Observatory receiver."""
+    """Emit framework-neutral spans and progress to an Goechala receiver."""
 
     def __init__(self, endpoint="http://127.0.0.1:4318", service="python-agent",
                  token=None, timeout=3.0, strict=False, capture_exception_message=False,
@@ -97,7 +97,7 @@ class Client:
                                              headers=headers, method="POST")
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 if not 200 <= response.status < 300:
-                    raise OSError(f"Observatory returned HTTP {response.status}")
+                    raise OSError(f"Goechala returned HTTP {response.status}")
             return True
         except Exception as exc:
             self.last_error = exc

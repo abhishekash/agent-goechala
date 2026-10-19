@@ -1,4 +1,4 @@
-"""LangChain and LangGraph callback adapter for Observatory traces."""
+"""LangChain and LangGraph callback adapter for Goechala traces."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -9,7 +9,7 @@ try:
 except ImportError as exc:  # pragma: no cover - depends on optional integration extra
     raise ImportError(
         "LangChainCallbackHandler requires the optional dependency: "
-        "pip install 'agent-observatory-cli[langchain]'"
+        "pip install 'agent-goechala[langchain] @ git+https://github.com/abhishekash/agent-goechala'"
     ) from exc
 
 
@@ -32,7 +32,7 @@ class LangChainCallbackHandler(BaseCallbackHandler):
         if self.run is not None:
             raise RuntimeError("callback handler is already attached to a run")
         if run._closed:
-            raise RuntimeError("cannot attach to a closed Observatory run")
+            raise RuntimeError("cannot attach to a closed Goechala run")
         self.run = run
         return self
 

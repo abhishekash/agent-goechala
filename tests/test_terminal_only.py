@@ -34,7 +34,7 @@ class TerminalOnlyReceiverTests(unittest.TestCase):
         response, body = self.get('/')
         self.assertEqual(response['status'], 200)
         self.assertTrue(response['headers']['Content-Type'].startswith('text/plain'))
-        self.assertIn(b'Agent Observatory is terminal-first', body)
+        self.assertIn(b'Agent Goechala is terminal-first', body)
         self.assertNotIn(b'<html', body.lower())
 
     def test_browser_and_agent_setup_pages_are_not_served(self):

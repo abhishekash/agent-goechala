@@ -12,7 +12,7 @@ from imageio_ffmpeg import get_ffmpeg_exe
 
 
 def make_preview(video: Path, output: Path):
-    segments = [(0, 2), (4, 7), (9, 12), (15, 19), (21, 24), (27, 29)]
+    segments = [(0, 2), (6, 9), (11, 14), (15, 19), (21, 25), (26, 29)]
     filters = [
         f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{i}]"
         for i, (start, end) in enumerate(segments)
@@ -20,7 +20,7 @@ def make_preview(video: Path, output: Path):
     inputs = "".join(f"[v{i}]" for i in range(len(segments)))
     filters.extend([
         f"{inputs}concat=n={len(segments)}:v=1:a=0,"
-        "fps=5,scale=960:-1:flags=lanczos,split[x][y]",
+        "fps=8,scale=960:-1:flags=lanczos,split[x][y]",
         "[y]palettegen=stats_mode=full[p]",
         "[x][p]paletteuse=dither=bayer:bayer_scale=5[v]",
     ])

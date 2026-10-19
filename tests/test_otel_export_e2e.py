@@ -196,7 +196,7 @@ class OTLPExportEndToEndTests(unittest.TestCase):
                     attributes={
                         "session.id": session_id,
                         "function_name": "latest_release",
-                        "function_args": '{"package":"agent-observatory"}',
+                        "function_args": '{"package":"agent-goechala"}',
                         "tool_type": "mcp",
                         "mcp_server_name": "packages",
                         "success": True,

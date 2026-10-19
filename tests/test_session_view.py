@@ -33,7 +33,7 @@ class SessionViewTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn('Progress Summary · Recorded Activity', detail)
                     self.assertIn('Current: Waiting', detail)
                     self.assertIn('answer in the Codex terminal', detail)
-                    self.assertIn('Observatory is read-only', detail)
+                    self.assertIn('Goechala is read-only', detail)
                     self.assertLess(detail.splitlines().index('Progress Summary · Recorded Activity'), 10)
                     # Mounting and refreshes never trigger paid API calls.
                     generate.assert_not_called()
@@ -278,12 +278,12 @@ class SessionViewTests(unittest.IsolatedAsyncioTestCase):
             'models': ['gemini-2.5-pro'], 'latest_status': 'WAITING',
             'latest_task': 'Inspect failing tests', 'last_unix_nano': time.time_ns(),
             'waiting_for': 'Approval', 'span_count': 3, 'trace_count': 1,
-            'project': 'agent-observatory'}]
+            'project': 'agent-goechala'}]
         item = next(row for row in sources(feed.snapshot) if row.get('session_id') == 'gemini-native-session')
         self.assertEqual(item['runtime'], 'Gemini CLI')
         self.assertEqual(item['state'], 'Waiting')
         self.assertEqual(item['waiting_for'], 'Approval')
-        self.assertEqual(item['project'], 'agent-observatory')
+        self.assertEqual(item['project'], 'agent-goechala')
         self.assertEqual(item['model'], 'gemini-2.5-pro')
         self.assertEqual(item['spans'], 3)
         feed.snapshot.sessions[0].update(latest_status='RUNNING', waiting_for='')

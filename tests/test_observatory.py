@@ -1083,20 +1083,20 @@ class ObservatoryTest(unittest.TestCase):
             "attributes": {"session.id": "gemini-session", "agent.task": "Inspect tests",
                             "agent.waiting_for": "User input"},
             "resource_attributes": {"service.name": "gemini-cli",
-                                     "vcs.repository.name": "agent-observatory"}, "events": []})
+                                     "vcs.repository.name": "agent-goechala"}, "events": []})
         model = normalize_native({"trace_id": TID, "span_id": CHILD, "parent_span_id": ROOT,
             "name": "generate_content", "start_unix_nano": 150,
             "end_unix_nano": 250, "status": "OK",
             "attributes": {"gen_ai.operation.name": "chat", "gen_ai.request.model": "gemini-2.5-pro",
                            "gen_ai.usage.input_tokens": 123, "gen_ai.usage.output_tokens": 45},
             "resource_attributes": {"service.name": "gemini-cli",
-                                     "vcs.repository.name": "agent-observatory"}, "events": []})
+                                     "vcs.repository.name": "agent-goechala"}, "events": []})
         self.store.ingest([root, model])
         session, = self.store.sessions()
         self.assertEqual(session["session_id"], "gemini-session")
         self.assertEqual(session["latest_status"], "OK")
         self.assertEqual(session["latest_task"], "Inspect tests")
-        self.assertEqual(session["project"], "agent-observatory")
+        self.assertEqual(session["project"], "agent-goechala")
         self.assertEqual((session["trace_count"], session["span_count"]), (1, 2))
         self.assertEqual((session["input_tokens"], session["output_tokens"]), (123, 45))
         self.assertEqual(session["models"], ["gemini-2.5-pro"])
@@ -1105,7 +1105,7 @@ class ObservatoryTest(unittest.TestCase):
     def test_session_roster_includes_untraced_runtime_logs(self):
         payload = {"resourceLogs": [{"resource": {"attributes": [
             {"key": "service.name", "value": {"stringValue": "gemini-cli"}},
-            {"key": "vcs.repository.name", "value": {"stringValue": "agent-observatory"}}]},
+            {"key": "vcs.repository.name", "value": {"stringValue": "agent-goechala"}}]},
             "scopeLogs": [{"logRecords": [
                 {"timeUnixNano": "100", "eventName": "gemini_cli.agent.start",
                  "attributes": [
@@ -1133,7 +1133,7 @@ class ObservatoryTest(unittest.TestCase):
         session = sessions["log-only-session"]
         self.assertEqual(session["session_id"], "log-only-session")
         self.assertEqual(session["services"], ["gemini-cli"])
-        self.assertEqual(session["project"], "agent-observatory")
+        self.assertEqual(session["project"], "agent-goechala")
         self.assertEqual(session["latest_task"], "Inspect the release")
         self.assertEqual(session["latest_status"], "OK")
         self.assertEqual((session["trace_count"], session["span_count"]), (0, 0))

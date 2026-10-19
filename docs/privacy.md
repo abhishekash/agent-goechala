@@ -1,6 +1,6 @@
 # Privacy and capture boundaries
 
-Agent Observatory is designed for local inspection. The receiver binds to loopback by default and stores telemetry in SQLite on the host running it.
+Agent Goechala is designed for local inspection. The receiver binds to loopback by default and stores telemetry in SQLite on the host running it.
 
 ## Native session discovery
 
@@ -13,7 +13,7 @@ Recognizable credentials and selected sensitive structured fields are redacted b
 Native activity content can be limited for new ingestion with:
 
 ```bash
-agent-observatory serve --metadata-only
+agent-goechala serve --metadata-only
 ```
 
 This does not erase content already stored. To stop native session discovery, use `--no-local-agents`.

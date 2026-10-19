@@ -98,7 +98,7 @@ def _normalize_cursor_event(event_name, attrs, body=None):
         attrs.setdefault("gen_ai.request.model", model)
         if "cursor.api.request.input_tokens" in attrs:
             # Cursor reports uncached input separately from cache read/create
-            # counts. GenAI input usage and Observatory's headline total count
+            # counts. GenAI input usage and Goechala's headline total count
             # all input token classes, while the original fields remain intact.
             attrs["gen_ai.usage.input_tokens"] = _token_count(
                 attrs.get("cursor.api.request.input_tokens"),

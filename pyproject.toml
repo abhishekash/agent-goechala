@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-observatory-cli"
+name = "agent-goechala"
 version = "0.1.2"
 description = "Terminal-first monitor for AI agent sessions, MCP calls, OpenTelemetry traces, and errors."
 requires-python = ">=3.11"
@@ -28,11 +28,11 @@ classifiers = [
 dependencies = ["textual>=8.2,<9"]
 
 [project.urls]
-Homepage = "https://github.com/abhishekash/agent-observatory"
-Documentation = "https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md"
-Repository = "https://github.com/abhishekash/agent-observatory"
-Issues = "https://github.com/abhishekash/agent-observatory/issues"
-Changelog = "https://github.com/abhishekash/agent-observatory/releases"
+Homepage = "https://github.com/abhishekash/agent-goechala"
+Documentation = "https://github.com/abhishekash/agent-goechala/blob/main/docs/usage.md"
+Repository = "https://github.com/abhishekash/agent-goechala"
+Issues = "https://github.com/abhishekash/agent-goechala/issues"
+Changelog = "https://github.com/abhishekash/agent-goechala/releases"
 
 [project.optional-dependencies]
 auto = [
@@ -46,6 +46,8 @@ langchain = ["langchain-core>=0.3.9,<2"]
 openai-agents = ["openai-agents>=0.1.0,<2"]
 
 [project.scripts]
+agent-goechala = "observatory.__main__:main"
+# Keep the original command available for existing installations.
 agent-observatory = "observatory.__main__:main"
 
 [tool.setuptools.exclude-package-data]

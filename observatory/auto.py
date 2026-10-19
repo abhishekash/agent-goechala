@@ -46,13 +46,13 @@ def _check_receiver(endpoint, token):
         with urllib.request.urlopen(urllib.request.Request(endpoint + "/api/health", headers=headers),
                                     timeout=3) as response:
             if response.status != 200:
-                raise SetupError("The Observatory receiver is not ready.")
+                raise SetupError("The Goechala receiver is not ready.")
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
             raise SetupError("This receiver needs a token. Set OBSERVATORY_TOKEN in your agent's terminal.") from exc
         raise SetupError(f"The receiver returned HTTP {exc.code}. Check --endpoint.") from exc
     except (OSError, urllib.error.URLError) as exc:
-        raise SetupError(f"Cannot reach Observatory at {endpoint}. Start the receiver or terminal cockpit first, then retry.") from exc
+        raise SetupError(f"Cannot reach Goechala at {endpoint}. Start the receiver or terminal cockpit first, then retry.") from exc
 
 
 class _Connection:
@@ -68,7 +68,7 @@ class _Connection:
 
     def start(self):
         if not self.client._post("/api/connections", self.payload):
-            raise SetupError("Could not register this agent with Observatory. Check the receiver address and token.")
+            raise SetupError("Could not register this agent with Goechala. Check the receiver address and token.")
         self.thread.start()
 
     def _heartbeat(self):
@@ -192,10 +192,10 @@ def run_agent(target, arguments=(), *, endpoint="http://127.0.0.1:4318", service
             hint = " ".join(failures) if failures else "No supported SDK found."
             raise SetupError("Automatic capture needs the OpenAI SDK, Anthropic SDK, or LangChain in this same Python environment. " + hint)
         if failures:
-            print("Observatory: some integrations could not start: " + ", ".join(failures), file=sys.stderr)
+            print("Goechala: some integrations could not start: " + ", ".join(failures), file=sys.stderr)
         connection = _Connection(endpoint, service, enabled, capture_content, token, source_id, events)
         connection.start()
-        print(f"Observatory is listening to {service}: {', '.join(enabled)}.\nReceiver: {endpoint}", file=sys.stderr)
+        print(f"Goechala is listening to {service}: {', '.join(enabled)}.\nReceiver: {endpoint}", file=sys.stderr)
         sys.argv = [target, *arguments]
         if module:
             runpy.run_module(target, run_name="__main__", alter_sys=True)
