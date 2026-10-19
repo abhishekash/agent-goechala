@@ -23,7 +23,7 @@ def _json_safe(value):
     return value
 
 
-def _normalize(service, resource, scope, metric, kind, temporality, point):
+def _normalize(service, resource, scope, metric, kind, temporality, point, metric_metadata=None):
     timestamp = int(point.get("timeUnixNano") or 0)
     if timestamp <= 0:
         raise ValueError("metric point requires timeUnixNano")
@@ -33,6 +33,13 @@ def _normalize(service, resource, scope, metric, kind, temporality, point):
         value = float(value) if "asDouble" in point else int(value)
     data = {key: item for key, item in point.items() if key not in
             ("timeUnixNano", "startTimeUnixNano", "attributes", "asDouble", "asInt")}
+    if "flags" in data:
+        try:
+            data["flags"] = max(0, int(data["flags"]))
+        except (TypeError, ValueError, OverflowError):
+            data.pop("flags", None)
+    if metric_metadata:
+        data.update(metric_metadata)
     if "exemplars" in point:
         data["exemplars"] = _normalize_exemplars(point.get("exemplars"))
     if value is not None:
@@ -113,9 +120,15 @@ def normalize_otlp_metrics(body):
                     if kind in metric:
                         matched = True
                         payload = metric[kind]
-                        temporality = int(payload.get("aggregationTemporality") or 0)
+                        temporality = (0 if kind == "summary" else
+                                       int(payload.get("aggregationTemporality") or 0))
+                        metadata = {}
+                        if kind == "sum" and isinstance(payload.get("isMonotonic"), bool):
+                            metadata["isMonotonic"] = payload["isMonotonic"]
+                        if kind == "summary":
+                            metadata["temporality_assumed"] = "cumulative"
                         result.extend(_normalize(service, resource, scope_name, metric,
-                                                  kind, temporality, point)
+                                                  kind, temporality, point, metadata)
                                       for point in payload.get("dataPoints", []))
                         break
                 if not matched:
@@ -135,6 +148,7 @@ def _packed_fixed64(value):
 
 def _point(raw, kind, depth):
     attrs_field = 1 if kind == "exponentialHistogram" else 9 if kind == "histogram" else 7
+    flags_field = 8 if kind in ("gauge", "sum", "summary") else 10
     point = {"attributes": []}
     buckets = {"positive": None, "negative": None}
     exemplar_field = 5 if kind in ("gauge", "sum") else 8 if kind == "histogram" else 11 if kind == "exponentialHistogram" else None
@@ -149,6 +163,8 @@ def _point(raw, kind, depth):
             point["startTimeUnixNano"] = value
         elif number == 3 and wire == 1:
             point["timeUnixNano"] = value
+        elif number == flags_field and wire == 0:
+            point["flags"] = value
         elif kind in ("gauge", "sum"):
             if number == 4 and wire == 1:
                 point["asDouble"] = _double(value)
@@ -245,12 +261,18 @@ def _metric(raw, service, resource, scope, depth):
         raise ValueError(f"metric {metric['name'] or 'unnamed'} has no supported data type")
     points = []
     temporality = 0
+    metadata = {}
     for number, wire, value in _nested(payload, depth + 1):
         if number == 1 and wire == 2:
             points.append(_point(value, kind, depth + 2))
-        elif number == 2 and wire == 0:
+        elif number == 2 and wire == 0 and kind != "summary":
             temporality = value
-    return [_normalize(service, resource, scope, metric, kind, temporality, point) for point in points]
+        elif kind == "sum" and number == 3 and wire == 0:
+            metadata["isMonotonic"] = bool(value)
+    if kind == "summary":
+        metadata["temporality_assumed"] = "cumulative"
+    return [_normalize(service, resource, scope, metric, kind, temporality, point, metadata)
+            for point in points]
 
 
 def decode_metric_request(raw):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 
@@ -77,6 +78,33 @@ def _blocked_activity(attrs):
     return result in {"blocked", "denied", "policy_denied"}
 
 
+def mcp_result_error(attrs):
+    """Return safe text when a structured MCP tool result reports an error."""
+    attrs = attrs if isinstance(attrs, dict) else {}
+    if any(attrs.get(key) is True for key in ("mcp.tool.is_error", "mcp.is_error")):
+        return "MCP tool response marked as an error."
+    for key in ("gcp.vertex.agent.tool_response", "gen_ai.tool.call.result",
+                "tool.result", "output.value"):
+        value = attrs.get(key)
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(value, dict) or not (
+            value.get("isError") is True or value.get("is_error") is True
+        ):
+            continue
+        content = value.get("content")
+        if isinstance(content, list):
+            messages = [str(item["text"]) for item in content
+                        if isinstance(item, dict) and isinstance(item.get("text"), str)]
+            if messages:
+                return _safe_text("; ".join(messages)[:500])
+        return "MCP tool response marked as an error."
+    return None
+
+
 def _activity_detail(attrs):
     domain = attrs.get("agent.activity.domain") or attrs.get("activity.domain") or "activity"
     action = attrs.get("agent.activity.action") or attrs.get("activity.action") or "action"
@@ -112,6 +140,12 @@ def analyze(spans, logs, outcome=None):
             if attrs.get("tool.name"):
                 key = (str(attrs["tool.name"]), str(reason or attrs.get("tool.error") or "error"))
                 failures.setdefault(key, []).append(span["span_id"])
+        mcp_error = mcp_result_error(attrs)
+        if mcp_error and not failed:
+            tool_name = attrs.get("gen_ai.tool.name") or attrs.get("mcp.tool.name") or span["name"]
+            findings.append(_finding(trace_id, "mcp_tool_error",
+                                     f"MCP tool returned an error: {tool_name}", "medium",
+                                     [{"type": "span", "id": span["span_id"]}], mcp_error))
         if span["name"] == "agent.run":
             stopped = attrs.get("agent.stopped_reason")
             if stopped and stopped != "completed":

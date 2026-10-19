@@ -9,7 +9,8 @@ from types import SimpleNamespace
 os.environ.pop('NO_COLOR', None)
 os.environ['TERM'] = 'xterm-256color'
 sys.path.insert(0, str(ROOT))
-from observatory.terminal import Snapshot
+from observatory.terminal import Snapshot, Feed
+from observatory.branding import masthead
 from observatory.terminal_ui import ObservatoryApp
 
 now = time.time_ns()
@@ -76,13 +77,24 @@ snapshot.activity = sorted(snapshot.activity, key=lambda item:item['time_unix_na
 
 class Thread:
     def is_alive(self): return True
-class FakeFeed:
+class FakeFeed(Feed):
     def __init__(self):
+        super().__init__(SimpleNamespace(endpoint='http://127.0.0.1:14318'))
         self.snapshot=snapshot; self.thread=Thread(); self.paused=False; self.include_reviews=False
         self.api=SimpleNamespace(endpoint='http://127.0.0.1:14318')
         self.selected_trace=trace_id; self.selected_span_id=None; self.pinned_trace=False
         self.session_id=''; self.service=''; self.query=''
-    def request_refresh(self): pass
+    def request_refresh(self):
+        self.snapshot.activity_results = [row for row in self.snapshot.activity
+            if (not self.service or row.get('service') == self.service)
+            and (not self.session_id or row.get('session_id') == self.session_id)
+            and (not self.activity_prompts or (row.get('domain') == 'message' and row.get('action') == 'user'))]
+        self.snapshot.mcp_results = [row for row in self.snapshot.mcp
+            if (not self.service or row.get('service') == self.service)
+            and (not self.session_id or row.get('session_id') == self.session_id)]
+        self.snapshot.queries = {'activity': self.activity_query, 'mcp': self.mcp_query, 'traces': self.query}
+        self.snapshot.updated = time.time()
+
 
 async def main():
     import argparse
@@ -99,7 +111,7 @@ async def main():
     frames=[]
     async with app.run_test(size=(150,46)) as pilot:
         await pilot.pause(.4)
-        app.query_one('#brand').update('◈  OBSERVATORY   /   DEMO')
+        app.query_one('#brand').update(masthead(demo=True))
         for page in ('agents','activity','mcp','traces','host'):
             app.action_page(page)
             await pilot.pause(.5)
@@ -117,7 +129,7 @@ async def main():
             app.action_expand()
             await pilot.pause(.3)
             raster(app.export_screenshot()).save(args.snapshots/'mcp-expanded.png')
-    target=ROOT/'media'/'terminal-demo.gif'
+    target=ROOT/'media'/'goechala-terminal-demo.gif'
     frames[0].save(target,save_all=True,append_images=frames[1:],duration=[2500,1800,2500,1800,1800],loop=0,optimize=True)
     print(f'Wrote synthetic walkthrough: {target} ({target.stat().st_size:,} bytes)')
 

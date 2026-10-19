@@ -1,124 +1,150 @@
 <p align="center">
-  <img src="media/logo.png" alt="Agent Observatory logo" width="640">
+  <img src="media/brand/hero.svg" alt="Agent Goechala — A clear view of every agent. A golden trail leads between two cyan mountain ridges." width="100%">
 </p>
 
-# Agent Observatory
-
-[![CI](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhishekash/agent-observatory/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/abhishekash/agent-observatory?style=social)](https://github.com/abhishekash/agent-observatory/stargazers)
-[![PyPI](https://img.shields.io/pypi/v/agent-observatory-cli)](https://pypi.org/project/agent-observatory-cli/)
-[![Downloads](https://img.shields.io/pypi/dm/agent-observatory-cli?label=downloads%2Fmonth)](https://pypistats.org/packages/agent-observatory-cli)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/abhishekash/agent-observatory/blob/main/LICENSE)
-![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![OpenTelemetry OTLP](https://img.shields.io/badge/OpenTelemetry-OTLP-425CC7?logo=opentelemetry&logoColor=white)
-![Local first](https://img.shields.io/badge/data-local--first-2E8B57)
-
-**See what your coding agents are doing, live.** Agent Observatory brings local Codex and Claude Code sessions together with OpenTelemetry from instrumented agents, so you can see which sessions are working or waiting, what they last did, which MCP tools they called, and where a trace failed. Browse it in a keyboard friendly terminal or a local web dashboard.
+<h1 align="center">Agent Goechala</h1>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4"><img src="media/investigation-demo-preview.gif" alt="Animated walkthrough: find an agent session, inspect a failed MCP response, and follow its trace" width="960"></a>
+  <strong>Your agents are working. See what is happening.</strong><br>
+  A local terminal monitor for Codex, Claude Code, OpenCode, and OpenTelemetry agents.
 </p>
 
-<p align="center"><em>Animated preview above · <a href="https://raw.githubusercontent.com/abhishekash/agent-observatory/main/media/investigation-demo.mp4">Full 31-second 1080p MP4</a> · <a href="docs/investigation-video.md">Transcript</a>. Actual terminal UI with synthetic data; no real prompts or files.</em></p>
+<p align="center">
+  <a href="https://github.com/abhishekash/agent-goechala/actions/workflows/ci.yml"><img src="https://github.com/abhishekash/agent-goechala/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/interface-terminal-73dce8?labelColor=0d1b2a" alt="Terminal interface">
+  <img src="https://img.shields.io/badge/data-local-ffd08a?labelColor=0d1b2a" alt="Data stays local">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-9aafc3?labelColor=0d1b2a" alt="MIT license"></a>
+</p>
 
-## Start in one command
+<p align="center">
+  <a href="#start">Start</a> · <a href="#see-the-work">See the work</a> · <a href="#go-deeper">Go deeper</a> · <a href="docs/usage.md">Documentation</a>
+</p>
 
-Requires Python 3.11+. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if needed, then:
+## See the work
 
-```bash
-uvx --from agent-observatory-cli agent-observatory
-```
+<p align="center">
+  <a href="https://github.com/abhishekash/agent-goechala/raw/refs/heads/main/media/goechala-demo.mp4">
+    <img src="media/goechala-demo-preview.gif" alt="Actual Agent Goechala terminal walkthrough: see running agents, read prompts, inspect a failed MCP call, and follow its execution." width="100%">
+  </a>
+</p>
 
-To keep the command installed:
+<p align="center">
+  <a href="https://github.com/abhishekash/agent-goechala/raw/refs/heads/main/media/goechala-demo.mp4">Watch the full 1080p video</a> · <a href="docs/investigation-video.md">Transcript and reproduction</a><br>
+  <sub>Actual terminal UI. Synthetic example records. No personal prompts or session logs.</sub>
+</p>
 
-```bash
-uv tool install agent-observatory-cli
-agent-observatory
-```
+Several agents, several terminals, and one question: **what has happened so far?**
 
-Or install it into the active Python environment with `python -m pip install agent-observatory-cli`.
+Goechala brings the sessions together. See which agents are working, what they
+last did, and which ones need your attention. Select a session to read its
+recorded progress, then follow the prompts, tool calls, and execution details.
 
-The terminal cockpit discovers recent local Codex and Claude Code sessions automatically. Press **b** to open the local web dashboard. It listens on `127.0.0.1:14318`.
+## Start
 
-### Your first minute
-
-1. Open **Agents**. Each row shows the runtime, session ID, repository/project, observed status, last update, any reported wait, and current or last task. Select a session to see its model, usage, and recent work.
-2. Open **MCP Calls** to see servers with observed calls in the selected history scope. Select a server to filter its calls, or inspect a call for recorded arguments, result, duration, and linked trace.
-3. Open **Activity** or **Traces** to follow the work around a call. Select a row and press **Enter** to inspect it; press **e** for a wider view. Press **b** to open the local browser dashboard.
-
-No sessions yet? Start a local Codex or Claude Code session and perform a task. Observatory discovers supported local session records; it does not attach to every process or infer unrecorded actions. Other runtimes need [instrumentation or OTLP export](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md). The MCP view lists servers with recorded calls, not every server configured on your machine.
-
-```text
-Codex / Claude Code logs ─┐
-Instrumented agents ─────┼─> local receiver ─> terminal cockpit / web dashboard
-                         └─> local SQLite history
-```
-
-### Optional AI session summaries
-
-Summaries are **off by default** and run only when you request one. Configure a compatible Chat Completions endpoint, model, and API key, then use **AI summary** on a selected session. The request contains the task, project, reported state, waiting reason, and recent action headlines; it excludes raw tool payloads, working directories, and hidden reasoning. Headlines can still contain private project details, so review the [data sent and provider setup](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md#optional-ai-summaries) before enabling it.
-
-Already cloned the repository? Run the installer for your shell:
+Requires **Python 3.11+**, Git, and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Run the renamed app directly from its source repository:
 
 ```bash
-./scripts/install.sh
+uvx --from git+https://github.com/abhishekash/agent-goechala agent-goechala
 ```
 
-```powershell
-.\scripts\install.ps1
+Or install the command once:
+
+```bash
+uv tool install --force git+https://github.com/abhishekash/agent-goechala
+agent-goechala
 ```
 
-These install the checkout as an isolated uv tool. Re-run the script after pulling an update. No administrator access is needed.
+Open it wherever you work. Supported local Codex, Claude Code, and OpenCode
+session records are discovered automatically. **No browser, account, or API key
+is needed for local monitoring and recorded-progress summaries.**
 
-## What you get
+Already have the checkout? Run `./scripts/install.sh` on macOS/Linux or
+`.\scripts\install.ps1` on Windows, then launch `agent-goechala`.
 
-- **Agents:** one row per discovered session, with session ID, project, observed status, update age, reported wait, and task/details.
-- **Activity:** readable user/assistant messages, shell commands, file changes, browser events, model use, and tool results.
-- **MCP:** observed server inventory and tool calls with readable arguments/results, errors, latency, and direct links to execution spans. Unobserved configured servers are not listed.
-- **Traces:** parent/child spans, model usage, errors, and evidence for each operation.
-- **Host:** known local agent processes and basic resource use, shown separately from sessions.
-- **Web dashboard:** searchable live activity with the same local receiver.
-- **Control:** `agent-observatory` opens one terminal cockpit. Its Control tab starts Codex, Claude Code, or OpenCode from a first-prompt goal, shows live sessions and errors, and handles pending approvals and questions in place. Press **b** only when you want the browser dashboard. [Learn more](docs/usage.md#agent-session-overview).
+## One overview. Detail when you need it.
 
-The cockpit adapts from compact terminals to wide workspaces. Search stays with each view, **Enter** inspects a row, **e** expands the details, and **Esc** returns to the list. Drag to highlight inspector text and press **Ctrl+C** to copy it; **c** copies the current details. Activity, MCP Calls, and Traces include **Older / Newer / Latest** controls for stored history, and **Alt+Left** returns from a linked trace to the event you were reading.
+| Start with… | Then inspect… |
+| --- | --- |
+| **Agents** — sessions, projects, status, last update | A session's goal, recorded progress, current work, and reported waits |
+| **Activity** — what happened in the selected session | Your prompts, assistant messages, shell commands, file changes, and errors |
+| **MCP calls** — which servers and tools were used | Readable arguments, responses, failures, duration, and the linked execution |
+| **Traces** — how a run fits together | Parent/child operations, model usage, and errors |
+| **Metrics and host** — resource and usage details | Recorded OTLP metrics and known local processes |
 
-The receiver stores data in a local SQLite file and listens on `127.0.0.1:14318`. Native session capture is bounded and redacts recognizable credentials on a best-effort basis. Choose metadata-only capture with `--metadata-only`. See [Privacy and capture boundaries](https://github.com/abhishekash/agent-observatory/blob/main/docs/privacy.md).
+Start agents and answer their requests in their own terminals. Goechala monitors
+the evidence they produce; it shows when a session needs a reply without
+pretending it can approve on the agent's behalf.
 
-## Connect other agents
+### Keyboard first
 
-Send OpenTelemetry traces, logs, and metrics over OTLP/HTTP, or use the Python and JavaScript clients:
+| Key | Action |
+| --- | --- |
+| `1`–`7` | Switch views |
+| `↑` / `↓`, `Enter` | Select and inspect a row |
+| `/` | Search the current view |
+| `e` | Expand the selected details |
+| `t` | Follow the linked trace |
+| `Esc` / `Alt+←` | Return / navigate back |
+| `c` | Copy details |
+| `q` | Quit |
 
-- [Python setup and automatic SDK capture](https://github.com/abhishekash/agent-observatory/blob/main/docs/python.md)
-- [Node.js client](https://github.com/abhishekash/agent-observatory/blob/main/docs/javascript.md)
-- [OTLP, receiver, and deployment configuration](https://github.com/abhishekash/agent-observatory/blob/main/docs/receiver.md)
-- [Complete usage guide and examples](https://github.com/abhishekash/agent-observatory/blob/main/docs/usage.md)
+In **Activity**, use **Prompts** to read the prompt sequence for the selected
+agent. Search, session scope, and selection help keep other sessions out of the
+investigation. Compact terminals can expand details with `e`.
 
-For MCP clients that need to query saved traces conversationally, see
-[SpanHound](https://github.com/abhishekash/spanhound), a local MCP
-server for trace failures, approvals, token usage, and run comparisons.
-SpanHound reads JSONL and OTLP JSON files and can capture supported Python library calls.
+## Local by default
 
-## Help improve agent observability
+Session records and telemetry stay in a local SQLite database. The built-in
+receiver listens on `127.0.0.1:14318`. Recognizable credentials are redacted on a
+best-effort basis; `--metadata-only` omits native session text, commands, and
+outputs. Read the [capture and privacy boundaries](docs/privacy.md) for details.
 
-[Tell us about your first run](https://github.com/abhishekash/agent-observatory/issues/new?template=first_run.yml):
-which agent you use, what you expected to see, and what was missing or confusing.
-Share a redacted example when reporting a capture or formatting problem.
+Recorded-progress summaries work immediately. Optional AI summaries reuse an
+existing `OPENAI_API_KEY` when available and run only when requested. Provider
+calls send the documented session evidence to that provider; review
+[AI summary setup and data](docs/usage.md#optional-ai-summaries) before enabling
+them.
 
-If Agent Observatory helps with your workflow, a [GitHub star](https://github.com/abhishekash/agent-observatory) helps other agent developers find it. Issues with a clear reproduction and small fixes are especially welcome.
+## Go deeper
+
+- [Complete usage guide](docs/usage.md)
+- [Python integrations and automatic SDK capture](docs/python.md)
+- [Pydantic AI, Google ADK, Gemini CLI, and other OTLP agents](docs/frameworks.md)
+- [JavaScript client](docs/javascript.md)
+- [Receiver and OTLP configuration](docs/receiver.md)
+- [Brand assets and Alpine Night theme](docs/branding.md)
+
+For querying recorded MCP executions conversationally, see
+[SpanHound](https://github.com/abhishekash/spanhound), the companion MCP tool.
 
 ## Develop
 
 ```bash
-git clone https://github.com/abhishekash/agent-observatory.git
-cd agent-observatory
-uv tool install --editable .
-python -m unittest discover -s tests -v
+git clone https://github.com/abhishekash/agent-goechala.git
+cd agent-goechala
+uv sync
+uv run agent-goechala
+uv run python -m unittest discover -s tests -v
 ```
 
-Contributions and bug reports are welcome. See [CONTRIBUTING.md](https://github.com/abhishekash/agent-observatory/blob/main/CONTRIBUTING.md) and [open an issue](https://github.com/abhishekash/agent-observatory/issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and demo production.
+[Issues](https://github.com/abhishekash/agent-goechala/issues) and small pull
+requests with clear reproductions are welcome.
 
-Maintainers can follow the [PyPI publishing guide](https://github.com/abhishekash/agent-observatory/blob/main/docs/publishing.md) to release a version with Trusted Publishing.
+<details>
+<summary>Upgrading from Agent Observatory</summary>
 
-## License
+Agent Goechala is the new name. Install from this repository to get the new
+command. Existing Python imports (`observatory`), `OBSERVATORY_*` settings,
+telemetry keys, and `observatory.db` history continue to work. The old command
+is also retained as an alias. The renamed PyPI distribution will be available
+after its first release; the source install above works independently of that
+publication.
 
-Agent Observatory is distributed under the [MIT License](https://github.com/abhishekash/agent-observatory/blob/main/LICENSE).
+</details>
+
+---
+
+**Agent Goechala** is open source under the [MIT license](LICENSE).
+The pass mark and the terminal's Alpine Night palette are included in the same repository.

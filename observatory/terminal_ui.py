@@ -8,9 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-import threading
 import time
-import webbrowser
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -25,9 +23,10 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.strip import Strip
-from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, TextArea, Tree
+from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
+from .branding import NAME, masthead
 
 
 def cell(value, style=''):
@@ -55,6 +54,16 @@ def quantity(value, singular, plural=None):
     return f"{value} {singular if value==1 else (plural or singular+'s')}"
 
 
+def reported_number(value):
+    return 'Not reported' if value is None else number(value)
+
+
+def observed_count(record, key):
+    if record.get(key + '_reported') is False:
+        return 'Not reported'
+    return reported_number(record.get(key))
+
+
 def when(stamp):
     value=time.localtime(stamp/1e9)
     return time.strftime('%H:%M:%S' if value[:3]==time.localtime()[:3] else '%m-%d %H:%M',value)
@@ -65,10 +74,63 @@ def table_when(stamp):
     return time.strftime('%H:%M:%S' if value[:3]==time.localtime()[:3] else '%m-%d',value)
 
 
+def metric_value(point):
+    data=(point or {}).get('data') or {}
+    try:
+        if int(data.get('flags',0)) & 1:
+            return 'No recorded value'
+    except (TypeError,ValueError,OverflowError):
+        pass
+    if 'value' in data:
+        return str(data['value'])
+    if 'count' in data:
+        return 'count '+str(data['count'])+(' · sum '+str(data['sum']) if 'sum' in data else '')
+    if data.get('quantileValues'):
+        return ', '.join(f"{item.get('quantile', '?')}: {item.get('value', '?')}"
+                         for item in data['quantileValues'][:3])
+    return 'distribution'
+
+
+def usage_series_text(points, service=None, session_id=None):
+    """Render token and run history without implying missing usage is zero."""
+    points = sorted(points or [], key=lambda item: item.get('start_unix_nano') or 0)[-7:]
+    scope = service or 'all services'
+    if session_id:
+        scope += ' · session ' + session_id[-8:]
+    if not points:
+        return f"TOKEN USAGE · LAST 7 DAYS · {scope}\nNo usage history recorded in this scope."
+
+    def total(key):
+        if not any(point.get(key + '_reported') for point in points):
+            return 'Not reported'
+        return number(sum(int(point.get(key) or 0) for point in points))
+
+    lines = [
+        f"TOKEN USAGE · LAST 7 DAYS · {scope}",
+        f"Input {total('input_tokens')}  ·  Output {total('output_tokens')}  ·  "
+        f"Runs {sum(int(point.get('runs') or 0) for point in points)}  ·  "
+        f"Errors {sum(int(point.get('errors') or 0) + int(point.get('log_errors') or 0) for point in points)}",
+        f"Cache read {total('cache_read_input_tokens')} · write {total('cache_write_input_tokens')} · "
+        f"reasoning {total('reasoning_output_tokens')}",
+        'Cached input is included in input tokens. Daily values use local dates.',
+        'DATE       INPUT       OUTPUT      RUNS  ERRORS  LOGS',
+    ]
+    for point in points:
+        stamp = point.get('start_unix_nano')
+        day = time.strftime('%b %d', time.localtime(stamp / 1e9)) if stamp else 'Unknown'
+        input_value = number(point.get('input_tokens') or 0) if point.get('input_tokens_reported') else '—'
+        output_value = number(point.get('output_tokens') or 0) if point.get('output_tokens_reported') else '—'
+        lines.append(f"{day:<10} {input_value:>10}  {output_value:>10}  "
+                     f"{int(point.get('runs') or 0):>4}  "
+                     f"{int(point.get('errors') or 0) + int(point.get('log_errors') or 0):>6}  "
+                     f"{int(point.get('log_events') or 0):>4}")
+    return '\n'.join(lines)
+
+
 def status(value):
     label={'OK':'OK','UNSET':'Observed','RUNNING':'In progress','ERROR':'Error','FAILED':'Failed','INCOMPLETE':'Incomplete',
            'success':'OK','started':'Started','completed':'Completed','observed':'Observed','reported':'Reported','error':'Error'}.get(str(value),str(value).title())
-    color='#ff8b92' if str(value).lower() in {'error','failed','denied','blocked','incomplete'} else '#6ee7c2' if str(value).lower() in {'success','ok','completed'} else '#8bbdff' if str(value).lower() in {'running','started'} else '#8b9bb0'
+    color='#ff9d91' if str(value).lower() in {'error','failed','denied','blocked','incomplete'} else '#73dce8' if str(value).lower() in {'success','ok','completed'} else '#ffd08a' if str(value).lower() in {'running','started'} else '#9aafc3'
     return cell(label,color)
 
 
@@ -190,9 +252,9 @@ def format_json(value):
 def write_json(log,value):
     """Render indented JSON and move multiline string values into readable blocks."""
     formatted,text_values=format_json(value)
-    log.write(Syntax(formatted,'json',word_wrap=True,background_color='#101720'))
+    log.write(Syntax(formatted,'json',word_wrap=True,background_color='#0d1b2a'))
     for path,content in text_values:
-        log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #92b9eb'))
+        log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #a8ddeb'))
         log.write(Text(content))
 
 
@@ -336,7 +398,113 @@ def sources(snapshot, include_reviews=False):
                        'runtime':entry.get('service'),'task':'Task not reported','recent':entry['state']=='running',
                        'state':'Connected' if entry['state']=='running' else 'Finished' if entry['state']=='stopped' else 'Offline',
                        'stamp':entry.get('last_seen_ns',0),'spans':entry.get('span_count',0),'review':False})
+    known_sessions={item.get('session_id') for item in result if item.get('session_id')}
+    for session in getattr(snapshot,'sessions',[]):
+        session_id=session.get('session_id')
+        if not session_id or session_id in known_sessions:
+            continue
+        known_sessions.add(session_id)
+        services=session.get('services') or []
+        service=services[0] if len(services)==1 else ''
+        stamp=session.get('last_unix_nano') or 0
+        recent=bool(stamp and time.time()-stamp/1e9<35)
+        reported=session.get('latest_status','UNKNOWN')
+        waiting_for=session.get('waiting_for') or ''
+        if reported in {'RUNNING','WAITING'}:
+            state=('No updates' if not recent else
+                   'Waiting' if reported=='WAITING' or waiting_for else 'Working')
+        else:
+            state={'ERROR':'Error','FAILED':'Failed','INCOMPLETE':'Incomplete',
+                   'OK':'Completed'}.get(reported,'Unknown')
+        latest_activity=max((event for event in snapshot.activity
+                             if event.get('session_id')==session_id),
+                            key=lambda event:event.get('time_unix_nano',0),default=None)
+        runtime='Gemini CLI' if any('gemini' in name.casefold() for name in services) else 'OpenTelemetry'
+        result.append({'id':'otlp-session:'+str(session_id),'source_id':'otlp-session:'+str(session_id),
+            'session_id':session_id,'runtime':runtime,'service':service,'project':session.get('project') or '',
+            'working_directory':'','branch':'','model':', '.join(session.get('models') or []),
+            'task':session.get('latest_task') or '', 'run_state':reported.casefold(),
+            'waiting_for':waiting_for,'last_activity':latest_activity,'capture_content':False,
+            'recent':recent,'stamp':stamp,'state':state,'spans':session.get('span_count',0),
+            'trace_count':session.get('trace_count',0),'review':False})
     return sorted(result,key=lambda item:(not item['recent'],-item['stamp'],item['id']))
+
+
+def wait_summary(item):
+    """Describe a recorded wait without implying this read-only monitor can answer it."""
+    reason=str(item.get('waiting_for') or '').strip()
+    folded=reason.casefold()
+    runtime=item.get('runtime') or 'agent'
+    if 'approval' in folded or 'permission' in folded:
+        return f'Approval needed · review it in the {runtime} terminal; Goechala is read-only.'
+    if 'user input' in folded or 'input request' in folded:
+        return f'Your reply is needed · answer in the {runtime} terminal; Goechala is read-only.'
+    if reason.lower().startswith('tool response:'):
+        return f'{reason} · tool response is pending; no user action was reported.'
+    if item.get('state')=='Waiting':
+        return 'Waiting · reason not reported; check the agent terminal.'
+    if item.get('state') in {'Completed'}:
+        return 'The agent reported completion.'
+    if item.get('state') in {'Error','Failed','Incomplete'}:
+        return 'Review the recorded error in Activity or Traces.'
+    return 'Remaining work is not reported by the agent.'
+
+
+def recorded_progress(item, events, totals):
+    """Render a fast, zero-setup progress summary from observed records only."""
+    recent=sorted(events,key=lambda event:event.get('time_unix_nano',0),reverse=True)
+    latest=recent[0] if recent else item.get('last_activity') or {}
+    errors=totals.get('errors') if isinstance(totals,dict) else None
+    if isinstance(errors,bool) or not isinstance(errors,(int,float)):
+        errors=None
+    if errors is None:
+        errors=sum(str(event.get('result') or '').casefold() in
+                   {'error','failed','denied','blocked','policy_denied','incomplete'}
+                   for event in recent)
+        error_note=f'{errors} recorded in captured recent activity'
+    else:
+        error_note=f'{int(errors)} recorded across observed runs'
+    latest_note=clean(headline(latest))[:120] if latest else 'No activity captured yet.'
+    return (f"Current: {item.get('state') or 'Unknown'}\n"
+            f"Latest: {latest_note}\n"
+            f"Errors: {error_note}\n"
+            f"Next: {wait_summary(item)}")
+
+
+def wait_label(item):
+    """Use compact but actionable wording in the session list."""
+    reason=str(item.get('waiting_for') or '').strip()
+    folded=reason.casefold()
+    runtime=item.get('runtime') or 'agent'
+    if 'approval' in folded or 'permission' in folded:
+        return f'Approval · {runtime} terminal'
+    if 'user input' in folded or 'input request' in folded:
+        return f'Reply · {runtime} terminal'
+    return reason or '—'
+
+
+def input_status(item):
+    """Name only user actions explicitly reported by a session."""
+    if not input_required(item):
+        return item.get('state') or 'Unknown'
+    reason=str(item.get('waiting_for') or '').casefold()
+    return 'NEEDS APPROVAL' if 'approval' in reason or 'permission' in reason else 'NEEDS REPLY'
+
+
+def input_required(item):
+    reason=str(item.get('waiting_for') or '').casefold()
+    return item.get('state')=='Waiting' and any(
+        marker in reason for marker in ('approval','permission','user input','input request'))
+
+
+def coverage_warning(local_status):
+    """Report discovery caps so a partial session list is not mistaken for all agents."""
+    omitted=[]
+    if local_status.get('omitted_sources'):
+        omitted.append(f"{local_status['omitted_sources']} older Codex/Claude sessions beyond the {local_status.get('max_sources',50)}-session limit")
+    if local_status.get('opencode_omitted_sessions'):
+        omitted.append(f"{local_status['opencode_omitted_sessions']} older OpenCode sessions beyond the 50-session limit")
+    return 'Coverage limited: '+'; '.join(omitted) if omitted else ''
 
 
 class ResultsTable(DataTable):
@@ -374,7 +542,7 @@ class ResultsTable(DataTable):
 
 
 class SearchInput(Input):
-    """Use familiar select-all behavior in dashboard search fields."""
+    """Use familiar select-all behavior in cockpit search fields."""
     BINDINGS=[Binding('ctrl+a','select_all','Select all',show=False)]
 
 
@@ -440,92 +608,76 @@ class ObservatoryScreen(Screen):
 
 
 class ObservatoryApp(App):
-    TITLE='Agent Observatory'
-    AUTO_FOCUS='#control-prompt'
+    TITLE=NAME
+    AUTO_FOCUS='#agent-table'
     CSS='''
-    Screen { background: #0d1117; color: #dce4ed; }
-    Screen.control-mode #summary, Screen.control-mode #controls { display: none; }
-    Screen > .screen--selection { background: #315a73; color: #ffffff; }
-    * { scrollbar-color: #405566; scrollbar-color-hover: #6b8995; scrollbar-color-active: #6ee7c2; scrollbar-background: #101720; scrollbar-background-hover: #101720; scrollbar-background-active: #101720; }
-    #masthead { height: 2; padding: 0 2; align-vertical: middle; }
-    #brand { width: 1fr; color: #e6edf3; text-style: bold; text-wrap: nowrap; }
-    #connection { width: auto; color: #6ee7c2; text-align: right; text-wrap: nowrap; }
+    Screen { background: #08121f; color: #e1edf5; }
+    Screen > .screen--selection { background: #2a596d; color: #ffffff; }
+    * { scrollbar-color: #385769; scrollbar-color-hover: #82a5b5; scrollbar-color-active: #73dce8; scrollbar-background: #0d1b2a; scrollbar-background-hover: #0d1b2a; scrollbar-background-active: #0d1b2a; }
+    #masthead { height: 3; padding: 0 2; align-vertical: middle; background: #0d1b2a; border-bottom: solid #304b63; }
+    #brand { width: 1fr; color: #f2f7fa; text-style: bold; text-wrap: nowrap; }
+    #connection { width: auto; color: #73dce8; text-align: right; text-wrap: nowrap; }
     #summary { height: 3; margin: 0 2 1 2; }
-    .stat { width: 1fr; border-left: solid #303b4b; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
-    #stat-sessions { border-left: solid #6ee7c2; }
+    .stat { width: 1fr; border-left: solid #2b455b; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
+    #stat-sessions { border-left: solid #73dce8; }
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
-    #scope-label { width: 7; height: 1; margin-top: 1; color: #8b9bb0; }
+    #scope-label { width: 7; height: 1; margin-top: 1; color: #9aafc3; }
     #scope { width: 37; margin-right: 1; }
-    SelectCurrent { background: #161e29; border: tall #263345; }
-    Select:focus > SelectCurrent { border: tall #6ee7c2; background-tint: transparent; }
-    SelectOverlay { background: #161e29; border: tall #6ee7c2; }
+    SelectCurrent { background: #122538; border: tall #304b63; }
+    Select:focus > SelectCurrent { border: tall #73dce8; background-tint: transparent; }
+    SelectOverlay { background: #122538; border: tall #73dce8; }
     #controls-spacer { width: 1fr; }
-    #reviews { width: 14; border: none; background: #0d1117; margin-top: 1; color: #8b9bb0; }
-    Checkbox > .toggle--button { color: #56667b; background: #161e29; }
-    Checkbox.-on > .toggle--button { color: #6ee7c2; }
-    Button { height: 3; min-width: 9; background: #161e29; color: #b5c6d9; border: tall #263345; text-style: none; }
-    Button:hover { background: #213345; border: tall #6ee7c2; }
-    Button:focus { border: tall #6ee7c2; text-style: bold; }
-    Button:disabled { color: #56667b; border: tall #1d2734; background: #101720; }
+    #reviews { width: 14; border: none; background: #08121f; margin-top: 1; color: #9aafc3; }
+    Checkbox > .toggle--button { color: #71889b; background: #122538; }
+    Checkbox.-on > .toggle--button { color: #73dce8; }
+    Button { height: 3; min-width: 9; background: #122538; color: #c4d7e5; border: tall #304b63; text-style: none; }
+    Button:hover { background: #1b3c50; border: tall #73dce8; }
+    Button:focus { border: tall #73dce8; text-style: bold; }
+    Button:disabled { color: #71889b; border: tall #203548; background: #0d1b2a; }
     #pause { width: 12; }
     #pages { height: 1fr; margin: 0 2; }
     Tabs { height: 3; padding-top: 1; }
-    Tab { color: #8b9bb0; padding: 0 2; }
-    Tab.-active { color: #6ee7c2; text-style: bold; }
-    Tabs:focus .-active { background: #183a35; color: #9ff3d9; }
-    Underline > .underline--bar { color: #6ee7c2; background: #263345; }
+    Tab { color: #9aafc3; padding: 0 2; }
+    Tab.-active { color: #73dce8; text-style: bold; }
+    Tabs:focus .-active { background: #173c4a; color: #b2f2ed; }
+    Underline > .underline--bar { color: #73dce8; background: #304b63; }
     TabPane { padding: 0; }
     ContentSwitcher { height: 1fr; }
-    .hint { height: 2; color: #8b9bb0; }
-    .box { border: round #303b4b; border-title-color: #b5c6d9; border-title-style: bold; background: #101720; padding: 0 1; }
-    .box:focus-within { border: round #537784; border-title-color: #6ee7c2; }
+    .hint { height: 2; color: #9aafc3; }
+    .box { border: round #2b455b; border-title-color: #c4d7e5; border-title-style: bold; background: #0d1b2a; padding: 0 1; }
+    .box:focus-within { border: round #5c9aac; border-title-color: #73dce8; }
     .results { height: 1fr; }
     .searchbar { height: 3; align-vertical: middle; }
-    .view-search { width: 1fr; margin-right: 1; padding: 0 1; background: #161e29; border: tall #263345; }
-    .view-search:focus { border: tall #6ee7c2; background-tint: transparent; }
-    Input > .input--placeholder { color: #8b9bb0; }
-    Input > .input--cursor { background: #6ee7c2; color: #0d1117; }
-    Input > .input--selection { background: #315a73; color: #ffffff; }
+    .view-search { width: 1fr; margin-right: 1; padding: 0 1; background: #122538; border: tall #304b63; }
+    .view-search:focus { border: tall #73dce8; background-tint: transparent; }
+    Input > .input--placeholder { color: #9aafc3; }
+    Input > .input--cursor { background: #73dce8; color: #08121f; }
+    Input > .input--selection { background: #2a596d; color: #ffffff; }
     .clear-search { width: 9; }
     .error-filter { width: 12; margin-right: 1; }
-    .error-filter.-on { color: #ff8b92; border: tall #ff8b92; background: #2d2028; }
-    .search-status { height: 1; color: #8b9bb0; padding: 0 1; }
+    .error-filter.-on { color: #ff9d91; border: tall #ff9d91; background: #3a2630; }
+    .prompt-filter { width: 12; margin-right: 1; }
+    .prompt-filter.-on { color: #73dce8; border: tall #73dce8; background: #173c4a; text-style: bold; }
+    .search-status { height: 1; color: #9aafc3; padding: 0 1; }
     .history-controls { height: 1; margin-top: 1; }
-    .history-controls Static { width: 1fr; color: #8b9bb0; }
+    .history-controls Static { width: 1fr; color: #9aafc3; }
     .history-controls Button { min-width: 8; width: auto; height: 1; margin-left: 1; border: none; }
-    .history-controls Button:focus { background: #203d47; color: #ffffff; }
+    .history-controls Button:focus { background: #214c61; color: #ffffff; }
     #history-back { width: 10; margin-right: 1; }
-    DataTable { background: #101720; height: 1fr; scrollbar-size: 1 1; }
+    DataTable { background: #0d1b2a; height: 1fr; scrollbar-size: 1 1; }
     DataTable:focus { background-tint: transparent; }
-    DataTable > .datatable--header { background: #1a2533; color: #a4b7cb; text-style: bold; }
-    DataTable > .datatable--cursor { background: #203d47; color: #eefdf8; text-style: bold; }
-    DataTable:blur > .datatable--cursor { background: #1d2d3b; color: #dce4ed; text-style: none; }
-    DataTable > .datatable--hover { background: #1a2b38; }
-    DataTable > .datatable--odd-row { background: #131d29; }
-    DataTable > .datatable--even-row { background: #101720; }
-    RichLog { background: #101720; color: #dce4ed; scrollbar-size: 1 1; }
+    DataTable > .datatable--header { background: #173148; color: #b5cee0; text-style: bold; }
+    DataTable > .datatable--cursor { background: #214c61; color: #f5ffff; text-style: bold; }
+    DataTable:blur > .datatable--cursor { background: #1a3449; color: #e1edf5; text-style: none; }
+    DataTable > .datatable--hover { background: #17364a; }
+    DataTable > .datatable--odd-row { background: #102233; }
+    DataTable > .datatable--even-row { background: #0d1b2a; }
+    RichLog { background: #0d1b2a; color: #e1edf5; scrollbar-size: 1 1; }
     RichLog:focus { background-tint: transparent; }
     #mcp-servers { height: 7; margin-bottom: 1; }
     .expanded #mcp-servers { display: none; }
     #agent-table { height: 1fr; min-height: 3; }
     #agent-bottom { height: 14; margin-top: 1; }
-    #control-pane { height: 1fr; }
-    #control-launch { height: auto; min-height: 10; margin-bottom: 1; padding: 1; }
-    #control-prompt { height: 4; margin: 1 0; }
-    #control-launch-row { height: 3; }
-    #control-runtime { width: 24; margin-right: 1; }
-    #control-start { width: 16; }
-    #control-status { height: 1; color: #8b9bb0; }
-    #control-alert { height: 1; color: #f2c779; text-style: bold; }
-    #control-alert.pulse { color: #0d1117; background: #f2c779; }
-    #control-workspace { height: 1fr; }
-    #control-sessions-box { width: 1fr; margin-right: 1; }
-    #control-attention-box { width: 1fr; }
-    #control-sessions, #control-requests { height: 1fr; min-height: 4; }
-    #control-detail { height: 5; margin-top: 1; }
-    #control-answer { height: 2; margin-top: 1; }
-    #control-actions { height: 3; margin-top: 1; }
-    #control-actions Button { width: 1fr; }
     #agent-info { width: 1fr; margin-right: 1; }
     #agent-detail { width: 100%; height: 1fr; }
     #agent-open { height: 3; width: 1fr; }
@@ -534,19 +686,20 @@ class ObservatoryApp(App):
     .list { width: 3fr; margin-right: 1; }
     .detail { width: 2fr; }
     .detail-log { height: 1fr; }
+    #usage-series { height: 12; min-height: 6; padding: 0 1; color: #b5cee0; }
     .detail-button { height: 3; width: 100%; }
     .inspector-actions { height: 3; }
     .inspector-actions Button { width: 1fr; }
     .expand-button { min-width: 12; }
     #trace-detail { width: 2fr; }
-    #span-tree { height: 1fr; min-height: 4; background: #101720; scrollbar-size: 1 1; }
-    #span-info { height: 10; border-top: solid #303b4b; }
-    #health { height: 1; padding: 0 2; color: #8b9bb0; }
-    Footer { background: #161e29; color: #8b9bb0; }
-    FooterKey { background: #20313e; color: #6ee7c2; }
-    FooterKey > .footer-key--key { background: #20313e; color: #6ee7c2; }
-    FooterKey > .footer-key--description { background: #161e29; color: #b5c6d9; }
-    FooterLabel { background: #161e29; color: #b5c6d9; }
+    #span-tree { height: 1fr; min-height: 4; background: #0d1b2a; scrollbar-size: 1 1; }
+    #span-info { height: 10; border-top: solid #2b455b; }
+    #health { height: 1; padding: 0 2; color: #9aafc3; }
+    Footer { background: #122538; color: #9aafc3; }
+    FooterKey { background: #1b3b50; color: #73dce8; }
+    FooterKey > .footer-key--key { background: #1b3b50; color: #73dce8; }
+    FooterKey > .footer-key--description { background: #122538; color: #c4d7e5; }
+    FooterLabel { background: #122538; color: #c4d7e5; }
     .narrow #masthead { padding: 0 1; }
     .narrow #summary { margin: 0 1; }
     .narrow .stat { padding: 0 1; }
@@ -558,7 +711,7 @@ class ObservatoryApp(App):
     .narrow .split { layout: vertical; }
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail, .narrow #trace-detail { width: 100%; height: 1fr; }
-    .compact #masthead { height: 1; }
+    .compact #masthead { height: 2; border-bottom: none; }
     .compact #summary { margin-bottom: 0; }
     .compact Tabs { height: 2; padding-top: 0; }
     .compact #agent-bottom, .compact .detail, .compact #trace-detail, .compact #host-detail { display: none; }
@@ -576,15 +729,16 @@ class ObservatoryApp(App):
               Binding('[','history("newer")','Newer',show=False),Binding(']','history("older")','Older',show=False),
               Binding('l','history("latest")','Latest',show=False),
               Binding('p','pause','Pause'),Binding('a','all','Reset',show=False),Binding('v','reviews','Reviews',show=False),
-              Binding('b','browser','Web'),Binding('q','quit','Quit'),Binding('escape','back','Back',show=False),
-              Binding('s','focus_agent','Focus agent',show=False),Binding('0','page("control")','Control',show=False),
-              Binding('1','page("agents")','Agents',show=False),
+              Binding('q','quit','Quit'),Binding('escape','back','Back',show=False),
+              Binding('s','focus_agent','Focus agent',show=False),Binding('1','page("agents")','Agents',show=False),
               Binding('2','page("activity")','Activity',show=False),Binding('3','page("mcp")','MCP',show=False),
-              Binding('4','page("traces")','Traces',show=False),Binding('5','page("host")','Host',show=False),Binding('6','page("output")','Output',show=False)]
+              Binding('4','page("traces")','Traces',show=False),Binding('5','page("host")','Host',show=False),
+              Binding('6','page("metrics")','Metrics',show=False),Binding('7','page("findings")','Findings',show=False)]
 
-    def __init__(self,feed,agent=None,owns_receiver=False):
+    def __init__(self,feed):
         super().__init__()
-        self.feed,self.agent,self.owns_receiver=feed,agent,owns_receiver
+        self.feed=feed
+        self.agent=None
         self.data=feed.snapshot
         self.last_update=0
         self.table_data={}
@@ -593,32 +747,40 @@ class ObservatoryApp(App):
         self.selected_source=None
         self.selected_activity=None
         self.selected_mcp=None
+        self.selected_metric=None
+        self.selected_finding=None
+        self.metric_history_requested_key=None
+        self.metric_history_loaded_key=None
+        self.metric_history_points=[]
         self.scope_options=None
         self.scope_value='all'
         self.span_signature=None
         self.search_timers={}
         self.refresh_timer=None
-        self.search_queries={page:'' for page in ('agents','activity','mcp','traces','host')}
+        self.search_queries={page:'' for page in ('agents','activity','mcp','traces','host','metrics','findings')}
         self.errors_only=set()
+        self.prompts_only=False
         self.navigation_history=[]
         self.ai_summaries={}
         self.summary_busy=False
-        self.control_snapshot={"sessions":[],"attention":[],"available_runtimes":{},"launches":[]}
-        self.control_tables={"control-sessions":{},"control-requests":{}}
-        self.selected_control_session=''
-        self.selected_control_request=''
-        self.control_signature=None
-        self.control_error=''
-        self.control_runtime_options=None
+        try:
+            from .ai_summary import SummaryConfig, SummaryError
+            SummaryConfig.from_env()
+            self.ai_summary_available=True
+        except SummaryError:
+            self.ai_summary_available=False
 
     def results(self,page,table,placeholder,classes=''):
         """Keep a view's filter, result count, and rows in one panel."""
         controls=[SearchInput(placeholder=placeholder,id='search-'+page,classes='view-search')]
+        if page=='activity':
+            controls.append(Button('Prompts',id='prompts-activity',classes='prompt-filter',
+                                   tooltip='Show only messages you sent to the selected agent'))
         if page in {'activity','mcp'}:
             controls.append(Button('Errors',id='errors-'+page,classes='error-filter',tooltip='Show only failed calls in the current results'))
         controls.append(Button('Clear',id='clear-'+page,classes='clear-search',disabled=True))
         footer=[]
-        if page in {'activity','mcp','traces'}:
+        if page in {'activity','mcp','traces','findings'}:
             footer=[Horizontal(Static('Latest',id='history-label-'+page),
                 Button('Newer',id='newer-'+page,compact=True,disabled=True),
                 Button('Older',id='older-'+page,compact=True,disabled=True),
@@ -632,7 +794,7 @@ class ObservatoryApp(App):
 
     def compose(self)->ComposeResult:
         with Horizontal(id='masthead'):
-            yield Static('◈  OBSERVATORY',id='brand')
+            yield Static(masthead(), id='brand')
             yield Static('○ Connecting',id='connection',markup=False)
         with Horizontal(id='summary'):
             for name in ('sessions','processes','mcp-count','usage'):
@@ -644,31 +806,7 @@ class ObservatoryApp(App):
             yield Static('',id='controls-spacer')
             yield Checkbox('Reviews',id='reviews')
             yield Button('Pause',id='pause')
-        with TabbedContent(initial='control',id='pages'):
-            with TabPane('0  Control',id='control'):
-                with Vertical(id='control-pane'):
-                    with Vertical(classes='box',id='control-launch'):
-                        yield Static('Start an agent · your first prompt becomes its goal',id='control-launch-title')
-                        yield TextArea(id='control-prompt',show_line_numbers=False,soft_wrap=True,
-                                       placeholder='Describe the goal for this agent…')
-                        with Horizontal(id='control-launch-row'):
-                            yield Select([],prompt='Choose an installed agent',id='control-runtime')
-                            yield Button('Start agent',id='control-start',variant='primary')
-                            yield Static('Run agents, inspect progress, and answer requests here.',id='control-status',markup=False)
-                    yield Static('',id='control-alert',markup=False)
-                    with Horizontal(id='control-workspace'):
-                        with Vertical(classes='box',id='control-sessions-box'):
-                            yield ResultsTable(id='control-sessions',cursor_type='row',zebra_stripes=True)
-                        with Vertical(classes='box',id='control-attention-box'):
-                            yield ResultsTable(id='control-requests',cursor_type='row',zebra_stripes=True)
-                            yield RichLog(id='control-detail',wrap=True,markup=False,auto_scroll=False)
-                            yield TextArea(id='control-answer',show_line_numbers=False,soft_wrap=True)
-                            with Horizontal(id='control-actions'):
-                                yield Button('Approve once',id='control-approve-once',variant='success')
-                                yield Button('Always allow',id='control-approve-always')
-                                yield Button('Deny',id='control-deny',variant='error')
-                                yield Button('Send answer',id='control-answer-send',variant='primary')
-                                yield Button('AI summary',id='control-summary')
+        with TabbedContent(initial='agents',id='pages'):
             with TabPane('1  Agents',id='agents'):
                 yield self.results('agents','agent-table','Filter agents by task, project, model, or session…')
                 with Horizontal(id='agent-bottom'):
@@ -676,7 +814,7 @@ class ObservatoryApp(App):
                         yield SelectableRichLog(id='agent-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         with Horizontal(classes='inspector-actions'):
                             yield Button(Text('Session activity · s'),id='agent-open')
-                            yield Button('AI summary',id='agent-summary',tooltip='Send this session’s task and up to 30 recent action headlines to your configured provider. Uses your API quota.')
+                            yield Button('AI summary',id='agent-summary',tooltip='Uses OPENAI_API_KEY when available. Runs only when requested; the recorded progress summary needs no setup.')
                     yield ResultsTable(id='agent-actions',classes='box',cursor_type='row',zebra_stripes=True)
             with TabPane('2  Activity',id='activity'):
                 with Horizontal(classes='split'):
@@ -690,7 +828,7 @@ class ObservatoryApp(App):
             with TabPane('3  MCP Calls',id='mcp'):
                 yield ResultsTable(id='mcp-servers',classes='box',cursor_type='row',zebra_stripes=True)
                 with Horizontal(classes='split'):
-                    yield self.results('mcp','mcp-table','Filter MCP calls by server, tool, arguments, or result…','list')
+                    yield self.results('mcp','mcp-table','Filter MCP operations by server, method, tool, arguments, or result…','list')
                     with Vertical(id='mcp-inspector',classes='detail box'):
                         yield SelectableRichLog(id='mcp-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
                         with Horizontal(classes='inspector-actions'):
@@ -706,10 +844,25 @@ class ObservatoryApp(App):
             with TabPane('5  Host',id='host'):
                 yield self.results('host','host-table','Filter processes by name, PID, project, or state…')
                 yield SelectableRichLog(id='host-detail',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=False)
-            if self.agent:
-                with TabPane('6  Output',id='output'):
-                    yield Static('stdout / stderr from the agent launched by this cockpit.',id='output-state',classes='hint')
-                    yield SelectableRichLog(id='agent-output',classes='box',min_width=1,wrap=True,markup=False,auto_scroll=True)
+            with TabPane('6  Metrics',id='metrics'):
+                with Horizontal(classes='split'):
+                    yield self.results('metrics','metrics-table','Filter metric, service, kind, or unit…','list')
+                    with Vertical(id='metrics-inspector',classes='detail box'):
+                        yield Static(id='usage-series')
+                        yield SelectableRichLog(id='metrics-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                        with Horizontal(classes='inspector-actions'):
+                            yield Button(Text('Open exemplar · t'),id='metrics-trace',disabled=True)
+                            yield Button(Text('Copy metric · c'),id='metrics-copy')
+                            yield Button(Text('Expand · e'),id='expand-metrics',classes='expand-button')
+            with TabPane('7  Findings',id='findings'):
+                with Horizontal(classes='split'):
+                    yield self.results('findings','finding-table','Filter findings by severity, type, task, or evidence…','list')
+                    with Vertical(id='finding-inspector',classes='detail box'):
+                        yield SelectableRichLog(id='finding-detail',classes='detail-log',min_width=1,wrap=True,markup=False,auto_scroll=False)
+                        with Horizontal(classes='inspector-actions'):
+                            yield Button(Text('Open trace · t'),id='finding-trace')
+                            yield Button(Text('Copy finding · c'),id='finding-copy')
+                            yield Button(Text('Expand · e'),id='expand-findings',classes='expand-button')
         yield Static('Connecting to receiver…',id='health',markup=False)
         yield Footer()
 
@@ -718,25 +871,19 @@ class ObservatoryApp(App):
 
     def on_mount(self):
         columns={
-            'control-sessions':[('Agent',11,0),('State',12,0),('Project',16,1),('Goal / task',30,3)],
-            'control-requests':[('Needs input',18,1),('Session',12,1),('Request',10,0)],
             'agent-table':[('Agent',11,0),('Session ID',12,1),('Repo / project',14,2),('Status',12,0),('Updated',8,0),('Waiting on',16,2),('Task / details',22,4)],
             'agent-actions':[('Time',8,0),('Type',7,0),('Recent actions',15,1)],
             'activity-table':[('Time',8,0),('Type',7,0),('Result',9,0),('Action',20,1)],
-            'mcp-servers':[('Observed server · Enter filters calls',30,3),('Calls',8,0),('Tools',8,0),('Errors',8,0)],
-            'mcp-table':[('Time',8,0),('Agent',11,1),('Server',9,1),('Tool',14,3),('Result',7,0),('Latency',7,0)],
+            'mcp-servers':[('Server · Enter filters operations',24,3),('Inventory',22,2),('Operations',8,0),('Metric calls',11,0),('Tools',8,0),('Errors',8,0)],
+            'mcp-table':[('Time',8,0),('Agent',11,1),('Server',9,1),('Tool / method',14,3),('Result',7,0),('Latency',7,0)],
             'trace-table':[('Result',11,0),('Task / run',20,1),('Spans',5,0),('Tokens in / out',15,0)],
-            'host-table':[('Process',10,1),('PID',7,0),('Project',12,2),('State',8,1),('RAM',9,0),('CPU total',9,0)]}
+            'host-table':[('Process',10,1),('PID',7,0),('Project',12,2),('State',8,1),('RAM',9,0),('CPU total',9,0)],
+            'metrics-table':[('Instrument',20,2),('Service',12,1),('Kind',12,0),('Latest value',17,1),('Unit',8,0),('Points',7,0)],
+            'finding-table':[('Severity',9,0),('Kind',18,1),('Finding',32,2),('Occurrences',12,0),('Last seen',10,0)]}
         for name,cols in columns.items():
             self.query_one('#'+name,ResultsTable).configure(cols)
-        for name,title in [('results-agents','Agent sessions'),('agent-detail','Session overview'),('agent-actions','Recent work'),('results-activity','Activity stream'),('activity-inspector','Event detail'),('mcp-servers','Servers observed in this scope · all stored history'),('results-mcp','MCP calls'),('mcp-inspector','Call detail'),('results-traces','Traces'),('trace-detail','Execution tree'),('results-host','Agent processes'),('host-detail','Collection status')]:
+        for name,title in [('results-agents','Agent sessions'),('agent-detail','Session overview'),('agent-actions','Recent work'),('results-activity','Activity stream'),('activity-inspector','Event detail'),('mcp-servers','Configured servers and servers with observed calls'),('results-mcp','MCP operations'),('mcp-inspector','Operation detail'),('results-traces','Traces'),('trace-detail','Execution tree'),('results-host','Agent processes'),('host-detail','Collection status'),('results-metrics','OTLP metric instruments'),('metrics-inspector','Metric detail'),('results-findings','Finding review'),('finding-inspector','Evidence and source')]:
             self.query_one('#'+name).border_title=title
-        self.query_one('#control-sessions').border_title='All agent sessions'
-        self.query_one('#control-requests').border_title='Needs input · requests you can handle here'
-        self.query_one('#control-detail').border_title='Selected agent or request'
-        self.query_one('#control-alert').display=False
-        for name in ('control-answer','control-approve-once','control-approve-always','control-deny','control-answer-send','control-summary'):
-            self.query_one('#'+name).display=False
         for page in self.search_queries:
             self.query_one('#results-'+page).border_subtitle='↑↓ select  ·  Enter inspect'
             self.query_one('#search-'+page).tooltip='Search this view · / to focus · Esc to return'
@@ -746,287 +893,14 @@ class ObservatoryApp(App):
             log.tooltip='Drag to select text · Ctrl+C copies selection · c copies details'
         self.query_one('#host-detail').styles.height=8
         self.update_layout()
-        self.screen.set_class(self.query_one('#pages',TabbedContent).active=='control','control-mode')
         if not self.feed.thread.is_alive():self.feed.thread.start()
         self.refresh_timer=self.set_interval(.3,self.refresh_data)
-        self.control_timer=self.set_interval(1.5,self.refresh_control)
-        self.control_alert_timer=self.set_interval(.65,self.flash_control_alert)
-        self.refresh_control()
-        self.query_one('#control-prompt',TextArea).focus()
+        self.query_one('#agent-table',DataTable).focus()
 
     def on_unmount(self):
         if self.refresh_timer:self.refresh_timer.stop()
-        if getattr(self,'control_timer',None):self.control_timer.stop()
-        if getattr(self,'control_alert_timer',None):self.control_alert_timer.stop()
         for timer in self.search_timers.values():timer.stop()
 
-    def refresh_control(self):
-        if getattr(self,'control_poll_active',False):return
-        self.control_poll_active=True
-        self.control_request(lambda:self.feed.api.get('/api/control'),self.control_snapshot_received)
-
-    def control_request(self,request,finished):
-        def run():
-            try:
-                result=request();error=''
-            except Exception as exc:
-                result=None;error=str(exc)
-            try:
-                self.call_from_thread(finished,result,error)
-            except RuntimeError:
-                pass
-        threading.Thread(target=run,name='observatory-control-request',daemon=True).start()
-
-    def control_snapshot_received(self,snapshot,error):
-        self.control_poll_active=False
-        if error:
-            self.control_failed(error)
-            return
-        self.apply_control_snapshot(snapshot)
-
-    def control_failed(self,message):
-        self.control_error=message
-        if self.query('#control-status'):
-            self.query_one('#control-status',Static).update('Control connection error: '+message)
-
-    def flash_control_alert(self):
-        alert=self.query('#control-alert')
-        if alert and alert.first().display:
-            self.control_alert_pulse=not getattr(self,'control_alert_pulse',False)
-            alert.first().set_class(self.control_alert_pulse,'pulse')
-
-    def apply_control_snapshot(self,snapshot):
-        self.control_error=''
-        self.control_snapshot=snapshot
-        self.render_control()
-
-    def render_control(self):
-        if not self.query('#control-sessions'):
-            return
-        snapshot=self.control_snapshot
-        available=snapshot.get('available_runtimes') or {}
-        options=[(runtime,runtime) for runtime,enabled in available.items() if enabled]
-        picker=self.query_one('#control-runtime',Select)
-        current=picker.value
-        runtime_options=tuple(options)
-        if runtime_options!=self.control_runtime_options:
-            picker.set_options(options or [('No installed agent CLI','_none_')])
-            current=current if current in {value for _,value in options} else (options[0][1] if options else '_none_')
-            picker.value=current
-            self.control_runtime_options=runtime_options
-        picker.disabled=not options
-        sessions=snapshot.get('sessions') or []
-        requests=snapshot.get('attention') or []
-        alert=self.query_one('#control-alert',Static)
-        if requests:
-            request=requests[0]
-            session=next((item for item in sessions if item.get('runtime')==request.get('runtime') and
-                          item.get('session_id')==request.get('session_id')),{})
-            project=session.get('project') or request.get('runtime') or 'Agent'
-            alert.update(f"⚠ {project} needs input · {request.get('kind','request')}")
-            alert.display=True
-        else:
-            alert.display=False
-            alert.remove_class('pulse')
-        self.query_one('#control-requests').border_title=f'Needs input · {len(requests)} pending'
-        jobs=snapshot.get('launches') or []
-        status_text='No compatible agent CLI found.' if not options else 'Run agents, inspect progress, and answer requests here.'
-        if jobs:
-            latest=jobs[0]
-            status_text=f"{latest['runtime']} launch {latest['state']}"+((': '+latest['error']) if latest.get('error') else '')
-        self.query_one('#control-status',Static).update(status_text)
-        session_signature=tuple((self.control_session_key(item),item.get('state'),item.get('goal'),item.get('task'),
-                                 item.get('updated_ns'),item.get('waiting_for')) for item in sessions)
-        request_signature=tuple((item.get('id'),item.get('runtime'),item.get('session_id'),item.get('kind')) for item in requests)
-        signature=(session_signature,request_signature)
-        if signature!=self.control_signature:
-            old_requests=set(self.control_tables['control-requests'])
-            self.control_signature=signature
-            session_table=self.query_one('#control-sessions',DataTable)
-            session_table.clear(columns=False)
-            self.control_tables['control-sessions']={}
-            for item in sessions:
-                key=self.control_session_key(item)
-                self.control_tables['control-sessions'][key]=item
-                session_table.add_row(cell(item.get('runtime') or 'Agent'),
-                    cell(item.get('state') or 'unknown','#fbbf24' if item.get('state')=='waiting' else '#6ee7c2'),
-                    cell(item.get('project') or '—'),cell(item.get('goal') or item.get('task') or 'Goal not captured'),key=key)
-            request_table=self.query_one('#control-requests',DataTable)
-            request_table.clear(columns=False)
-            self.control_tables['control-requests']={}
-            for item in requests:
-                key=str(item.get('id') or '')
-                if not key:continue
-                self.control_tables['control-requests'][key]=item
-                session=next((s for s in sessions if s.get('runtime')==item.get('runtime') and
-                              s.get('session_id')==item.get('session_id')),{})
-                request_table.add_row(cell(item.get('runtime') or 'Agent'),
-                    cell(session.get('project') or str(item.get('session_id') or '')[-12:]),
-                    cell(item.get('kind') or 'request','#fbbf24'),key=key)
-            if self.selected_control_session not in self.control_tables['control-sessions']:
-                self.selected_control_session=next(iter(self.control_tables['control-sessions']), '')
-            if self.selected_control_request not in self.control_tables['control-requests']:
-                self.selected_control_request=next(iter(self.control_tables['control-requests']), '')
-            new_requests=set(self.control_tables['control-requests'])-old_requests
-            if new_requests:
-                request=self.control_tables['control-requests'][next(iter(new_requests))]
-                self.notify(request.get('runtime','Agent')+' is asking for input.',severity='warning',timeout=10)
-            self.render_control_detail()
-        elif not self.selected_control_request and not self.selected_control_session and sessions:
-            self.selected_control_session=self.control_session_key(sessions[0])
-            self.render_control_detail()
-
-    @staticmethod
-    def control_session_key(session):
-        return str(session.get('runtime') or '')+':'+str(session.get('session_id') or '')
-
-    def load_control_session(self,runtime,session_id):
-        self.control_request(lambda:self.feed.api.get('/api/control/session?'+urlencode({'runtime':runtime,'id':session_id})),
-            lambda detail,error:self.control_session_received(runtime,session_id,detail,error))
-
-    def control_session_received(self,runtime,session_id,detail,error):
-        self.apply_control_session_detail(runtime,session_id,detail if not error else {'error':error})
-
-    def apply_control_session_detail(self,runtime,session_id,detail):
-        if self.selected_control_request:return
-        if self.selected_control_session!=runtime+':'+session_id:return
-        self.control_session_detail=detail
-        self.render_control_detail()
-
-    def render_control_detail(self):
-        if not self.query('#control-detail'):return
-        log=self.query_one('#control-detail',RichLog)
-        log.clear()
-        request=self.control_tables['control-requests'].get(self.selected_control_request)
-        session=self.control_tables['control-sessions'].get(self.selected_control_session)
-        for name in ('control-answer','control-approve-once','control-approve-always','control-deny','control-answer-send','control-summary'):
-            self.query_one('#'+name).display=False
-        if request:
-            runtime=request.get('runtime','Agent');kind=request.get('kind','request')
-            session_label=str(request.get('session_id') or '')
-            log.write(Text(f'{runtime} · {kind} request',style='bold #e6edf3'))
-            log.write(Text('\nSession '+session_label))
-            details=request.get('detail') or {}
-            if kind=='permission':
-                log.write(Text('\nPermission: '+str(details.get('permission') or 'Approval requested'),style='bold #f2c779'))
-                if details.get('metadata'):
-                    log.write(Text('\n'+json.dumps(details['metadata'],ensure_ascii=False,indent=2)))
-                self.query_one('#control-approve-once').display=True
-                self.query_one('#control-deny').display=True
-                if runtime=='OpenCode':self.query_one('#control-approve-always').display=True
-            else:
-                questions=details.get('questions') or []
-                log.write(Text('\nAnswer each question below. For a multi-select question, separate choices with commas.'))
-                for index,question in enumerate(questions,1):
-                    log.write(Text(f"\n{index}. {question.get('question') or 'Question'}",style='bold #92b9eb'))
-                    choices=[option.get('label','') for option in question.get('options') or []]
-                    if choices:log.write(Text('  Choices: '+', '.join(choices)))
-                    if question.get('description'):log.write(Text('  '+str(question['description'])))
-                answer=self.query_one('#control-answer',TextArea)
-                answer.text=''
-                answer.placeholder='One answer per line'
-                self.query_one('#control-answer').display=True
-                self.query_one('#control-answer-send').display=True
-            return
-        if session:
-            runtime=session.get('runtime','Agent');session_id=session.get('session_id','')
-            detail=getattr(self,'control_session_detail',None)
-            if not detail or detail.get('session_id')!=session_id:
-                self.control_session_detail=None
-                log.write(Text(f"{runtime} · {session.get('state','unknown')}",style='bold #e6edf3'))
-                log.write(Text('\nLoading goal and recent activity…'))
-                self.load_control_session(runtime,session_id)
-            elif detail.get('error'):
-                log.write(Text('Could not load session: '+detail['error'],style='#ff8b92'))
-            else:
-                log.write(Text(f"{runtime} · {session.get('state','unknown')}",style='bold #e6edf3'))
-                log.write(Text('\nGoal: '+str(session.get('goal') or detail.get('goal') or 'Goal not captured')))
-                if session.get('waiting_for'):log.write(Text('\nWaiting for: '+str(session['waiting_for']),style='#f2c779'))
-                if session.get('state')=='waiting' and not session.get('can_reply'):
-                    log.write(Text('\nThis existing session is observed only. Reply in its agent terminal.',style='#8b9bb0'))
-                log.write(Text('\nRecent prompts and activity',style='bold #92b9eb'))
-                events=detail.get('events') or []
-                if not events:log.write(Text('\nNo recorded activity yet.'))
-                for event in events[-8:]:
-                    label=' · ERROR' if str(event.get('result') or '').lower() in {'error','failed'} else ''
-                    log.write(Text(f"\n{event.get('domain','event')} / {event.get('action','update')}{label}"))
-                    body=event.get('detail') or event.get('subject') or ''
-                    if body:log.write(Text('\n  '+str(body)[:700]))
-            self.query_one('#control-summary').display=True
-            return
-        log.write(Text('Select an agent or a pending request. Start an agent above to begin.',style='#8b9bb0'))
-
-    def launch_control_agent(self):
-        prompt=self.query_one('#control-prompt',TextArea).text.strip()
-        runtime=self.query_one('#control-runtime',Select).value
-        if not prompt:
-            self.notify('Enter the first prompt. It becomes the agent goal.',severity='warning')
-            self.query_one('#control-prompt').focus();return
-        if runtime in {Select.BLANK,None,'_none_'}:
-            self.notify('Choose an installed agent.',severity='warning');return
-        self.query_one('#control-start',Button).disabled=True
-        self.query_one('#control-status',Static).update('Starting '+str(runtime)+'…')
-        self.post_control_launch(str(runtime),prompt)
-
-    def post_control_launch(self,runtime,prompt):
-        self.control_request(lambda:self.feed.api.post('/api/control/launch',{'runtime':runtime,'prompt':prompt}),
-            lambda result,error:self.control_launch_finished(runtime,error))
-
-    def control_launch_finished(self,runtime,error):
-        self.query_one('#control-start',Button).disabled=False
-        if error:
-            self.query_one('#control-status',Static).update('Could not start agent: '+error)
-        else:
-            self.query_one('#control-prompt',TextArea).text=''
-            self.query_one('#control-status',Static).update(runtime+' started. Watching for progress and requests.')
-            self.refresh_control()
-
-    def send_control_reply(self,decision=None,answer=False):
-        request=self.control_tables['control-requests'].get(self.selected_control_request)
-        if not request:return
-        payload={'runtime':request['runtime'],'session_id':request['session_id'],'kind':request['kind'],'request_id':request['id']}
-        if request['kind']=='permission':payload['decision']=decision
-        else:
-            questions=(request.get('detail') or {}).get('questions') or []
-            lines=self.query_one('#control-answer',TextArea).text.splitlines()
-            if len(lines)!=len(questions) or any(not line.strip() for line in lines):
-                self.notify('Enter one answer on each line.',severity='warning');return
-            payload['answers']=[([choice.strip() for choice in line.split(',') if choice.strip()]
-                if question.get('multiple') or question.get('multiSelect') else [line.strip()])
-                for line,question in zip(lines,questions)]
-        self.query_one('#control-status',Static).update('Sending response…')
-        self.post_control_reply(payload,request['runtime'])
-
-    def post_control_reply(self,payload,runtime):
-        self.control_request(lambda:self.feed.api.post('/api/control/reply',payload),
-            lambda result,error:self.control_reply_finished(runtime,error))
-
-    def control_reply_finished(self,runtime,error):
-        if error:
-            self.notify('Could not send response: '+error,severity='error',timeout=8)
-            return
-        self.query_one('#control-status',Static).update('Response sent to '+runtime+'.')
-        self.selected_control_request=''
-        self.refresh_control()
-
-    def summarize_control_session(self):
-        session=self.control_tables['control-sessions'].get(self.selected_control_session)
-        if not session:return
-        self.query_one('#control-summary',Button).disabled=True
-        self.post_control_summary(session['runtime'],session['session_id'])
-
-    def post_control_summary(self,runtime,session_id):
-        self.control_request(lambda:self.feed.api.post('/api/control/summary',{'runtime':runtime,'session_id':session_id}),
-            lambda result,error:self.control_summary_finished(result.get('summary','No summary returned.') if result else '',error))
-
-    def control_summary_finished(self,summary,error):
-        self.query_one('#control-summary',Button).disabled=False
-        if error:
-            self.notify('AI summary unavailable: '+error,severity='warning',timeout=10)
-            return
-        log=self.query_one('#control-detail',RichLog);log.clear()
-        log.write(Text('AI progress summary',style='bold #6ee7c2'))
-        log.write(Text('\n'+summary))
     def on_resize(self,event):
         self.update_layout(event.size)
         self.call_after_refresh(self.reflow_inspectors)
@@ -1051,9 +925,9 @@ class ObservatoryApp(App):
         self.screen.set_class(size.height<36,'compact')
 
     def stat(self,name,value,label,detail):
-        text=Text(label.upper()+'\n',style='#8b9bb0',no_wrap=True,overflow='ellipsis')
-        text.append(str(value),style='bold #e6edf3')
-        text.append('\n'+detail,style='#8b9bb0')
+        text=Text(label.upper()+'\n',style='#9aafc3',no_wrap=True,overflow='ellipsis')
+        text.append(str(value),style='bold #f2f7fa')
+        text.append('\n'+detail,style='#9aafc3')
         self.query_one('#stat-'+name,Static).update(text)
 
     def fill(self,name,rows,preserve=None):
@@ -1088,6 +962,7 @@ class ObservatoryApp(App):
         text='Filtering…' if waiting else quantity(count,('matching '+noun) if query else noun,
                                                     ('matching '+plural) if query and plural else plural)
         if not waiting and query and not count:text+=' · Clear to remove this filter'
+        if page=='activity' and self.prompts_only:text+=' · user prompts only'
         if page in self.errors_only:text+=' · errors only'
         self.query_one('#search-status-'+page,Static).update(text)
 
@@ -1104,30 +979,27 @@ class ObservatoryApp(App):
         connection='Ⅱ Paused' if self.feed.paused else '○ Reconnecting' if data.error else '● Connected'
         endpoint=self.feed.api.endpoint.removeprefix('http://').removeprefix('https://')
         self.query_one('#connection',Static).update(Text(connection+'  '+endpoint,
-            style='#f2c779' if self.feed.paused else '#ff8b92' if data.error else '#6ee7c2'))
-        health=Text(data.error,style='#ff8b92') if data.error else Text(
-            f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}",
-            style='#8b9bb0')
+            style='#f2c779' if self.feed.paused else '#ff9d91' if data.error else '#73dce8'))
+        health_text=(data.error if data.error else
+            f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}")
+        coverage=coverage_warning(data.local_status)
+        if coverage:health_text+='  ·  '+coverage
+        health=Text(health_text,style='#f2c779' if coverage and not data.error else '#ff9d91' if data.error else '#9aafc3')
         self.query_one('#health',Static).update(health)
         if self.screen.selections:
             self.query_one('#health',Static).update('Text selected · Ctrl+C to copy · click to clear selection and resume display updates')
             return
         if data.updated==self.last_update:return
         self.last_update=data.updated;self.data=data
-        if self.agent:
-            lines=list(self.agent.lines)
-            if getattr(self,'output_lines',None)!=lines:
-                self.output_lines=lines
-                output=self.query_one('#agent-output',RichLog);output.clear();output.write(Text('\n'.join(lines)))
-            code=self.agent.process.poll()
-            self.query_one('#output-state',Static).update('Agent process running · stdout / stderr' if code is None else f'Agent process exited with code {code} · captured stdout / stderr')
         agents=sources(data,self.feed.include_reviews)
         work=sources(data,False)
         recent=sum(item['recent'] for item in work)
         reviews=sum(entry.get('service')=='codex-review' for entry in data.local_status.get('sessions',[]))
         processes=(data.local_status.get('runtime') or {}).get('processes',[])
         live=sum(not str(item.get('state','')).startswith(('Z','X')) for item in processes)
-        self.stat('sessions',len(work),'Agent sessions',f'{recent} updated recently · {sum(item["state"]=="Waiting" for item in work)} waiting')
+        waiting=sum(item['state']=='Waiting' for item in work)
+        replies=sum(input_required(item) for item in work)
+        self.stat('sessions',len(work),'Agent sessions',f'{recent} updated recently · {waiting} waiting · {replies} need action')
         self.stat('processes',live,'Host processes','PIDs on this host')
         servers={item.get('server') for item in data.mcp if item.get('server') and item.get('server')!='Not reported'}
         operations={(item.get('server'),item.get('tool')) for item in data.mcp if item.get('tool') and item.get('tool')!='Not reported'}
@@ -1140,9 +1012,21 @@ class ObservatoryApp(App):
         self.stat('mcp-count',quantity(call_count,'call')+('' if self.size.width<110 else ' · '+quantity(server_count,'server')),'Observed MCP',
                   f'{quantity(server_count,"server")} · {quantity(mcp_errors,"error")}' if self.size.width<110 else f'{quantity(tool_count,"tool")} · {quantity(mcp_errors,"error")}')
         self.query_one('#stat-mcp-count').tooltip='All stored calls in the selected scope. Configured servers appear only after an observed call.\n'+', '.join(row['server'] for row in inventory.get('servers',[]))
-        self.stat('usage',number(data.totals.get('input_tokens'))+' / '+number(data.totals.get('output_tokens')),'Tokens in / out','Includes cached input')
+        if inventory.get('metric_calls'):
+            self.query_one('#stat-mcp-count').tooltip += (
+                f"\nCursor aggregate MCP metric: {number(inventory['metric_calls'])} calls across all conversations; "
+                "shown separately because metrics have no session IDs or call details.")
+        self.query_one('#mcp-servers').tooltip=(
+            'Calls are individual calls with operation details. Metric calls are Cursor aggregate counts; '
+            'they cannot be opened or attributed to a session. Calls without a reported server are listed separately.')
+        self.stat('usage',observed_count(data.totals,'input_tokens')+' / '+observed_count(data.totals,'output_tokens'),'Tokens in / out','Headline totals include cached input. Cache read/write and reasoning counts are breakdowns, not additional tokens.')
         self.query_one('#stat-sessions').tooltip=f'{reviews} approval reviews · Recent means a session record changed within 35 seconds'
-        self.query_one('#stat-usage').tooltip='Recorded token totals; repeated and cached input is included. This is not a billable cost estimate.'
+        self.query_one('#stat-usage').tooltip=(
+            'Recorded token totals; repeated and cached input is included. '
+            f"Cache read {observed_count(data.totals,'cache_read_input_tokens')} · "
+            f"cache write {observed_count(data.totals,'cache_write_input_tokens')} · "
+            f"reasoning output {observed_count(data.totals,'reasoning_output_tokens')}. "
+            'Breakdowns are already included in headline totals. This is not a billable cost estimate.')
         options=[('All agent sessions','all')]+[(f"{item['runtime']} · {item.get('project') or 'SDK'} · {(item.get('session_id') or item['id'])[-6:]}",item['id']) for item in agents]
         if options!=self.scope_options:
             picker=self.query_one('#scope',Select);old=self.scope_value
@@ -1151,26 +1035,59 @@ class ObservatoryApp(App):
         agent_query=self.search_queries['agents'].casefold()
         visible_agents=[item for item in agents if (self.scope_value=='all' or item['id']==self.scope_value) and
                         (not agent_query or agent_query in ' '.join(str(item.get(key) or '') for key in ('runtime','service','project','working_directory','branch','task','model','session_id','id','state','waiting_for')).casefold())]
+        visible_agents.sort(key=lambda item:(not input_required(item),not item['recent'],-item['stamp'],item['id']))
         self.fill('agent-table',[(item['id'],[
-            cell(item['runtime']),cell(item.get('session_id') or item['id'],'#a4b7cb'),
+            cell(item['runtime']),cell(item.get('session_id') or item['id'],'#b5cee0'),
             cell(item.get('project') or '—'),
-            cell(item['state'],'#fbbf24' if item['state']=='Waiting' else '#6ee7c2' if item['recent'] else '#8b9bb0'),
-            cell(age(item['stamp']),'#8b9bb0'),cell(item.get('waiting_for') or '—'),
+            cell(input_status(item),'bold #ff9d91' if input_required(item) else '#fbbf24' if item['state']=='Waiting' else '#73dce8' if item['recent'] else '#9aafc3'),
+            cell(age(item['stamp']),'#9aafc3'),cell(wait_label(item)),
             cell(item.get('task') or 'Task not reported')],item) for item in visible_agents])
         self.search_status('agents',len(visible_agents),'session')
         if self.selected_source not in {item['id'] for item in visible_agents}:self.selected_source=visible_agents[0]['id'] if visible_agents else None
         self.show_agent()
         activity_items=self.visible_results('activity',data.activity_results if data.activity_results is not None else data.activity)
         activity_items=self.hold_selected('activity',activity_items,self.selected_activity,'source_id')
-        activity=[(item.get('id') or item['source_id'],[cell(table_when(item['time_unix_nano'])),cell(item['domain'].upper(),'#92b9eb'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
+        activity=[(item.get('id') or item['source_id'],[cell(table_when(item['time_unix_nano'])),cell(item['domain'].upper(),'#a8ddeb'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
+        self.query_one('#results-activity').border_title='User prompts · newest first' if self.prompts_only else 'Activity stream'
         self.fill('activity-table',activity)
-        self.search_status('activity',len(activity),'event')
+        self.search_status('activity',len(activity),'prompt' if self.prompts_only else 'event')
         if self.selected_activity not in self.table_data.get('activity-table',{}):self.selected_activity=activity[0][0] if activity else None
         self.show_activity()
-        self.fill('mcp-servers',[(row['server'],[cell(row['server']),cell(number(row['calls'])),cell(number(row['tools'])),cell(number(row['errors']))],row) for row in data.mcp_summary.get('servers',[])])
+        observed={row['server']:row for row in data.mcp_summary.get('servers',[])}
+        metric_observed={row['server']:row for row in data.mcp_summary.get('metric_servers',[])}
+        configured={}
+        for item in data.local_status.get('mcp_configurations',[]):
+            configured.setdefault(item['server'],[]).append(item)
+        inventory=[]
+        for server in sorted(set(observed)|set(metric_observed)|set(configured),key=str.casefold):
+            calls=observed.get(server,{'calls':0,'tools':0,'errors':0})
+            metric_calls=metric_observed.get(server,{}).get('calls',0)
+            configs=configured.get(server,[])
+            origins=', '.join(sorted({item['client']+' ('+item['scope']+')' for item in configs}))
+            label=('Configured · '+origins if configs else
+                   'Aggregate metric · Cursor' if metric_calls and server not in observed else 'Observed')
+            if configs and server in observed:
+                label='Observed · configured in '+origins
+            if metric_calls and (configs or server in observed):
+                label+=' · metric totals available'
+            row={'server':server,'calls':calls.get('calls',0),'metric_calls':metric_calls,
+                 'tools':calls.get('tools',0),'errors':calls.get('errors',0)}
+            inventory.append((server,[cell(server),cell(label,'#73dce8' if configs else '#9aafc3'),
+                cell(number(row['calls'])),cell(number(row['metric_calls'])),
+                cell(number(row['tools'])),cell(number(row['errors']))],row))
+        unknown_calls=data.mcp_summary.get('unknown_server_calls',0)
+        if unknown_calls:
+            unknown={'server':'Not reported','calls':unknown_calls,
+                     'metric_calls':0,'tools':data.mcp_summary.get('unknown_server_tools',0),
+                     'errors':data.mcp_summary.get('unknown_server_errors',0)}
+            inventory.append(('Not reported',[cell('Not reported'),
+                cell('Server identity missing · attribution unavailable','#fbbf24'),
+                cell(number(unknown['calls'])),cell('0'),cell(number(unknown['tools'])),
+                cell(number(unknown['errors']))],unknown))
+        self.fill('mcp-servers',inventory)
         mcp_items=self.visible_results('mcp',data.mcp_results if data.mcp_results is not None else data.mcp)
         mcp_items=self.hold_selected('mcp',mcp_items,self.selected_mcp,'id')
-        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano']),'#8b9bb0'),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server'],'#a4b7cb'),cell(item['tool']),status(item['status']),cell('—' if item['duration_ms'] is None else timing(item['duration_ms']))],item) for item in mcp_items])
+        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano']),'#9aafc3'),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server'],'#b5cee0'),cell(item['tool'] if item.get('tool') not in ('', 'Not reported') else item.get('method') or 'Not reported'),status(item['status']),cell('—' if item['duration_ms'] is None else timing(item['duration_ms']))],item) for item in mcp_items])
         if self.selected_mcp not in self.table_data.get('mcp-table',{}):self.selected_mcp=mcp_items[0]['id'] if mcp_items else None
         self.show_mcp()
         if not data.mcp_available:
@@ -1183,16 +1100,34 @@ class ObservatoryApp(App):
             mcp_hint=f"{quantity(len(mcp_items),'matching operation' if self.search_queries['mcp'] else 'operation')} · {quantity(server_count,'server')} · {quantity(error_count,'error')}"
         elif self.search_queries['mcp']:
             mcp_hint='No matching MCP operations · Clear to show all calls in this scope'
+        elif data.mcp_summary.get('metric_calls'):
+            mcp_hint=(f"No per-call events · {quantity(data.mcp_summary['metric_calls'],'aggregate MCP metric call')} "
+                      "from Cursor; select Metrics for the underlying series")
         else:
             mcp_hint='No MCP operations in this scope · General tool activity is available in Activity'
         if 'mcp' in self.errors_only:mcp_hint=f"{quantity(len(mcp_items),'failed call')} · errors only · current results"
+        config_errors=data.local_status.get('mcp_config_errors',0)
+        if config_errors:
+            mcp_hint+=f" · {quantity(config_errors,'MCP config could not be read')}"
         self.query_one('#mcp-hint',Static).update(mcp_hint)
         traces=self.visible_results('traces',data.traces[:])
         detail=data.detail
         if self.feed.pinned_trace and detail.get('summary') and not any(item['trace_id']==detail['trace_id'] for item in traces):traces.insert(0,detail['summary'])
-        self.fill('trace-table',[(item['trace_id'],[cell('Active · errors','yellow') if item.get('active') and item['status']=='ERROR' else cell('Error','red') if item['status']=='ERROR' else status(item['status']),cell(trace_name(item)),cell(item['span_count']),cell(number(item['input_tokens'])+' / '+number(item['output_tokens']))],item) for item in traces],preserve=self.feed.selected_trace)
+        self.fill('trace-table',[(item['trace_id'],[cell('Active · errors','yellow') if item.get('active') and item['status']=='ERROR' else cell('Error','red') if item['status']=='ERROR' else status(item['status']),cell(trace_name(item)),cell(item['span_count']),cell(observed_count(item,'input_tokens')+' / '+observed_count(item,'output_tokens'))],item) for item in traces],preserve=self.feed.selected_trace)
         self.search_status('traces',len(traces),'trace')
-        for page in ('activity','mcp','traces'):
+        finding_query=self.search_queries['findings'].casefold()
+        finding_items=[item for item in data.finding_results if not finding_query or finding_query in ' '.join(
+            str(item.get(key) or '') for key in ('severity','kind','title','detail','task','session_id','services','run_status')).casefold()]
+        self.fill('finding-table',[(item['id'],[
+            cell(str(item.get('severity') or 'Unknown').upper(),'#ff9d91' if item.get('severity')=='high' else '#fbbf24' if item.get('severity')=='medium' else '#b5cee0'),
+            cell(item.get('kind') or 'Finding'),cell(item.get('title') or 'Review finding'),
+            cell(number(item.get('occurrence_count',1))),cell(age(item.get('time_unix_nano',0)) if item.get('time_unix_nano') else '—')],item)
+            for item in finding_items])
+        self.search_status('findings',len(finding_items),'finding')
+        if self.selected_finding not in self.table_data.get('finding-table',{}):
+            self.selected_finding=finding_items[0]['id'] if finding_items else None
+        self.show_finding()
+        for page in ('activity','mcp','traces','findings'):
             paging=data.pagination.get(page,{})
             page_number=paging.get('page',1)
             self.query_one('#history-label-'+page,Static).update('Latest' if page_number==1 else f'History · page {page_number}')
@@ -1206,11 +1141,96 @@ class ObservatoryApp(App):
         self.fill('host-table',[(str(item['pid']),[cell(item['name']),cell(item['pid']),cell(item.get('project') or '—'),cell(item['state']),cell(f"{item['memory_rss_kib']/1024:.0f} MiB"),cell(f"{item['cpu_seconds']:.1f} s")],item) for item in visible_processes])
         self.search_status('host',len(visible_processes),'process','processes')
         runtime=data.local_status.get('runtime') or {}
+        opencode_sessions=sum(entry.get('runtime')=='OpenCode' for entry in data.local_status.get('sessions',[]))
         self.inspect('host-detail','Host & collection status',[
             ('Host',runtime.get('host','Not reported')),('Platform',str(runtime.get('os',''))+' / '+str(runtime.get('architecture',''))),
             ('Load average',', '.join(str(value) for value in runtime.get('load_average',[])) or 'Unavailable'),
-            ('Sources',f"{data.local_status.get('sources',0)} recent files · lookback {data.local_status.get('lookback_hours',24)}h · read errors {data.local_status.get('read_errors',0)}"),
+            ('Sources',f"{data.local_status.get('sources',0)} Codex / Claude files · {opencode_sessions} OpenCode sessions · lookback {data.local_status.get('lookback_hours',24)}h · read errors {data.local_status.get('read_errors',0)+data.local_status.get('opencode_read_errors',0)}"),
             ('Coverage','Source logs can be partial. Costs and model-call latency are unavailable unless reported. CPU is cumulative process time.')],[])
+        metric_query=self.search_queries['metrics'].casefold()
+        selected_source=getattr(self,'source_map',{}).get(self.scope_value)
+        scoped_service=selected_source.get('service') if selected_source else None
+        visible_catalog=[]
+        for item in data.metric_catalog:
+            if scoped_service and item.get('service')!=scoped_service:
+                continue
+            searchable=' '.join(str(item.get(key) or '') for key in
+                ('name','service','kind','unit','description','scope_name')).casefold()
+            if metric_query and metric_query not in searchable:
+                continue
+            visible_catalog.append(item)
+        def metric_key(item):
+            return json.dumps([item.get(key) for key in
+                ('service','name','kind','temporality','scope_name','unit','description')],ensure_ascii=False)
+        latest_by_key={}
+        for point in data.metric_points:
+            latest_by_key.setdefault(metric_key(point),point)
+        metric_rows=[]
+        for item in visible_catalog:
+            latest=latest_by_key.get(metric_key(item))
+            metric_rows.append((metric_key(item),[
+                cell(item.get('name') or 'unnamed'),cell(item.get('service') or 'unknown'),
+                cell(item.get('kind') or '—'),cell(metric_value(latest) if latest else 'No point'),
+                cell(item.get('unit') or '—'),cell(number(item.get('point_count') or 0))],item))
+        self.fill('metrics-table',metric_rows,preserve=self.selected_metric)
+        if self.selected_metric not in self.table_data.get('metrics-table',{}):
+            self.selected_metric=metric_rows[0][0] if metric_rows else None
+        metric=self.table_data.get('metrics-table',{}).get(self.selected_metric)
+        if metric:
+            selected_metric_key=metric_key(metric)
+        else:
+            selected_metric_key=None
+            self.metric_history_requested_key=None
+            self.metric_history_loaded_key=None
+            self.metric_history_points=[]
+        if not data.metrics_available:
+            metric_hint='This receiver version does not expose OTLP metrics. Update and restart the receiver.'
+        elif metric_query and not metric_rows:
+            metric_hint='No matching metric instruments · Clear to show the catalog.'
+        elif metric_rows:
+            metric_hint=quantity(len(metric_rows),'instrument')+' · latest readings from stored OTLP points'
+        else:
+            metric_hint='No OTLP metrics recorded in this scope.'
+        self.query_one('#search-status-metrics',Static).update(metric_hint)
+        self.query_one('#usage-series',Static).update(usage_series_text(
+            data.usage_series,data.usage_service,data.usage_session_id))
+        if metric:
+            history=self.metric_history_points if self.metric_history_loaded_key==selected_metric_key else []
+            latest=history[0] if history else latest_by_key.get(metric_key(metric))
+            exemplars=[]
+            for point in history or ([latest] if latest else []):
+                exemplars.extend((point.get('data') or {}).get('exemplars') or [])
+            exemplar=next((item for item in exemplars if item.get('trace_id')),None)
+            self.query_one('#metrics-trace',Button).disabled=exemplar is None
+            point_fields=[]
+            if latest:
+                temporality=('Cumulative (implicit for Summary)' if latest.get('kind')=='summary' else
+                    {0:'Unspecified',1:'Delta',2:'Cumulative'}.get(latest.get('temporality'),str(latest.get('temporality'))))
+                point_fields=[('Latest reading',metric_value(latest)),('Observed',age(latest.get('time_unix_nano'))),
+                    ('Temporality',temporality),
+                    ('Point start',when(latest.get('start_unix_nano')) if latest.get('start_unix_nano') else 'Not reported')]
+                monotonic=(latest.get('data') or {}).get('isMonotonic')
+                if latest.get('kind')=='sum' and isinstance(monotonic,bool):
+                    point_fields.append(('Semantics','Monotonic counter' if monotonic else 'Up/down sum'))
+            history_lines=[]
+            for point in history[:12]:
+                stamp=point.get('time_unix_nano')
+                label=when(stamp) if stamp else 'Unknown time'
+                attrs=point.get('attributes') or {}
+                suffix=' · '+json.dumps(attrs,ensure_ascii=False,sort_keys=True) if attrs else ''
+                history_lines.append(f"{label}  {metric_value(point)} {metric.get('unit') or ''}{suffix}".rstrip())
+            self.inspect('metrics-detail','OTLP metric instrument',[
+                ('Name',metric.get('name')),('Service',metric.get('service')),('Kind',metric.get('kind')),
+                ('Unit',metric.get('unit') or 'Unitless'),('Description',metric.get('description') or 'Not reported'),
+                ('Instrumentation scope',metric.get('scope_name') or 'Not reported'),
+                ('Stored points',metric.get('point_count',0)),*point_fields],
+                [('Latest point attributes',latest.get('attributes') if latest else None),
+                 ('Resource attributes',latest.get('resource_attributes') if latest else None),
+                 ('Recent points · newest first','\n'.join(history_lines) if history_lines else None),
+                 ('Point data',latest.get('data') if latest else None)])
+        else:
+            self.query_one('#metrics-trace',Button).disabled=True
+            self.inspect('metrics-detail','OTLP metric instruments',[('Status',metric_hint)],[])
 
     def scope_label(self):
         item=getattr(self,'source_map',{}).get(self.scope_value)
@@ -1230,8 +1250,8 @@ class ObservatoryApp(App):
         self.inspector_signatures[name]=signature
         log=self.query_one('#'+name,RichLog)
         scroll=log.scroll_offset
-        log.clear();log.write(Text(title,style='bold #e6edf3'))
-        table=Table.grid(padding=(0,2));table.add_column(style='#8b9bb0',no_wrap=True);table.add_column()
+        log.clear();log.write(Text(title,style='bold #f2f7fa'))
+        table=Table.grid(padding=(0,2));table.add_column(style='#9aafc3',no_wrap=True);table.add_column()
         for label,value in fields:table.add_row(Text(label),Text(str('Not reported' if value is None or value=='' else value)))
         log.write(table)
         for label,value in sections:self.write_evidence(log,label,value)
@@ -1244,7 +1264,7 @@ class ObservatoryApp(App):
         if isinstance(value,str) and label.casefold() in {'recorded content','text','output','response'}:
             segments=embedded_json(value)
             if any(kind=='json' for kind,_ in segments):
-                log.write(Text('\n'+label.title(),style='bold #92b9eb'))
+                log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
                 for kind,content in segments:
                     if kind=='text':
                         if content.strip():log.write(Text(content.strip('\n')))
@@ -1261,12 +1281,12 @@ class ObservatoryApp(App):
             if key.lower()=='wrapper':
                 self.write_evidence(log,label,child,depth+1);return
         if depth==0 and isinstance(value,(dict,list)) and value:
-            log.write(Text('\n'+label.upper(),style='bold #6ee7c2'))
+            log.write(Text('\n'+label.upper(),style='bold #73dce8'))
             if label.lower()=='arguments':
                 write_json(log,value)
                 return
         if isinstance(value,(dict,list)) and not value:
-            log.write(Text('\n'+label.title(),style='bold #92b9eb'))
+            log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
             log.write(Text('No entries' if isinstance(value,list) else 'Empty object'))
             return
         if isinstance(value,dict) and value.get('type') in {'text','input_text','output_text'} and 'text' in value:
@@ -1285,34 +1305,37 @@ class ObservatoryApp(App):
             for child in value:self.write_evidence(log,label,child,depth+1)
             return
         if isinstance(value,(dict,list)):
-            log.write(Text('\n'+label.title(),style='bold #92b9eb'))
+            log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
             write_json(log,value)
             return
-        log.write(Text('\n'+label.title(),style='bold #92b9eb'))
+        log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
         if label.lower()=='command':
             command=shell_command(value)
             script=heredoc_script(command)
             if script:
                 language,title,body=script
-                log.write(Text(title,style='bold #92b9eb'))
-                log.write(Syntax(body or '# Empty script',language,word_wrap=True,background_color='#101720'))
+                log.write(Text(title,style='bold #a8ddeb'))
+                log.write(Syntax(body or '# Empty script',language,word_wrap=True,background_color='#0d1b2a'))
                 return
-            log.write(Syntax(command,'bash',word_wrap=True,background_color='#101720'))
+            log.write(Syntax(command,'bash',word_wrap=True,background_color='#0d1b2a'))
         elif label.lower() in {'diff','patch','unified diff','code'}:
             lexer='diff' if 'diff' in label.lower() or label.lower()=='patch' else 'python' if label.lower()=='code' else 'bash'
-            log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#101720'))
+            log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#0d1b2a'))
         else:log.write(Text(str(value)))
 
     def show_agent(self):
         item=getattr(self,'source_map',{}).get(self.selected_source)
-        self.query_one('#agent-summary',Button).disabled=not bool(item) or self.summary_busy
+        button=self.query_one('#agent-summary',Button)
+        button.disabled=not bool(item) or self.summary_busy or not self.ai_summary_available
+        if not self.ai_summary_available:
+            button.tooltip='No compatible API key or provider is configured. The recorded progress summary below works without setup.'
         if not item:
             self.query_one('#agent-open',Button).disabled=True
-            self.fill('agent-actions',[])
+            self.fill('agent-actions',[('__empty__',[cell('—'),cell('INFO'),cell('No session selected')],{})])
             if self.search_queries['agents']:
                 self.inspect('agent-detail','No matching agent sessions',[],[('Search','Clear the filter in Agent sessions to show all sessions in this scope.')])
             else:
-                self.inspect('agent-detail','No agent sessions found',[],[('Next step','Local Codex and Claude Code sessions are discovered automatically. Python SDK agents can use the capture launcher.')])
+                self.inspect('agent-detail','No agent sessions found',[],[('Next step','Start or continue an agent in its own terminal. This cockpit monitors existing sessions.')])
             return
         self.query_one('#agent-open',Button).disabled=False
         summary=next((entry for entry in self.data.sessions if item.get('session_id') and entry.get('session_id')==item.get('session_id')),{})
@@ -1321,23 +1344,37 @@ class ObservatoryApp(App):
         ai_sections=[]
         if generated:
             stamp,text=generated
-            label='AI summary · earlier snapshot' if stamp!=item.get('stamp') else 'AI summary · verify against recorded events'
+            label='AI summary · earlier snapshot' if stamp!=item.get('stamp') else 'AI summary · provider generated'
             ai_sections=[(label,text)]
-        self.inspect('agent-detail',clean(item.get('task') or 'Task not reported'),[
-            ('Agent',item['runtime']),('Session ID',item.get('session_id') or item['id']),
-            ('Repo / project',item.get('project') or 'Not reported'),('Branch',item.get('branch') or 'Not reported'),
-            ('Status',item['state']),('Waiting on',item.get('waiting_for') or 'No wait reported'),
-            ('Last updated',when(item['stamp'])+' · '+age(item['stamp']) if item['stamp'] else 'Not reported'),
-            ('Latest',headline(latest) if latest else 'Not reported'),
-            ('Model',item.get('model') or 'Not reported'),
-            ('Work',f"{summary.get('trace_count',0)} traces · {item.get('spans',0)} spans · {number(summary.get('input_tokens'))} in / {number(summary.get('output_tokens'))} out"),
-            ('Cost','Not reported' if not summary or summary.get('unknown_cost_runs') else f"${summary.get('known_cost_usd',0):.4f} known")],
-            ai_sections+[('Working directory',item.get('working_directory')),
-             ('Status evidence','No new session records for 35 seconds; the last reported wait may no longer be current.' if item['state']=='No updates' else 'Status comes from recorded lifecycle events. A tool response wait is not an approval request.')])
         actions=[event for event in self.data.activity if event.get('session_id')==item.get('session_id')] if item.get('session_id') else [event for event in self.data.activity if event.get('service')==item.get('service')]
         meaningful=[event for event in actions if event.get('domain') in {'shell','file','mcp','browser','model','message'}]
         actions=sorted(meaningful or actions,key=lambda event:event.get('time_unix_nano',0),reverse=True)
-        self.fill('agent-actions',[(event.get('id') or event['source_id'],[cell(table_when(event['time_unix_nano'])),cell(event['domain'].upper()),cell(headline(event))],event) for event in actions[:30]])
+        progress=recorded_progress(item,actions,summary)
+        wait=wait_summary(item)
+        work_detail=(f"{reported_number(summary.get('trace_count'))} traces · {reported_number(item.get('spans'))} spans · "
+                     f"{observed_count(summary,'input_tokens')} in / {observed_count(summary,'output_tokens')} out")
+        token_detail=(f"Cache read {observed_count(summary,'cache_read_input_tokens')} · "
+                      f"cache write {observed_count(summary,'cache_write_input_tokens')} · "
+                      f"reasoning output {observed_count(summary,'reasoning_output_tokens')}")
+        cost_detail=('Not reported' if not summary or summary.get('unknown_cost_runs')
+                     else f"${summary.get('known_cost_usd',0):.4f} known")
+        session_details=(f"Session ID: {item.get('session_id') or item['id']}\n"
+            f"Repo / project: {item.get('project') or 'Not reported'}\n"
+            f"Branch: {item.get('branch') or 'Not reported'}\n"
+            f"Model: {item.get('model') or 'Not reported'}\n"
+            f"Work: {work_detail}\nToken breakdown: {token_detail}\nCost: {cost_detail}")
+        self.inspect('agent-detail',clean(item.get('task') or 'Task not reported'),[
+            ('Agent',item['runtime']),
+            ('Status',item['state']),('Waiting on',wait if item['state']=='Waiting' or item.get('waiting_for') else 'No wait reported'),
+            ('Last updated',when(item['stamp'])+' · '+age(item['stamp']) if item['stamp'] else 'Not reported')],
+            [('Progress summary · recorded activity',progress)]+ai_sections+[
+             ('Session details',session_details),
+             ('Working directory',item.get('working_directory')),
+             ('Status evidence','No new session records for 35 seconds; the last reported wait may no longer be current.' if item['state']=='No updates' else 'Status comes from recorded lifecycle events. A tool response wait is not an approval request.')])
+        rows=[(event.get('id') or event['source_id'],[cell(table_when(event['time_unix_nano'])),cell(event['domain'].upper()),cell(headline(event))],event) for event in actions[:30]]
+        if not rows:
+            rows=[('__empty__',[cell('—'),cell('INFO'),cell('No recent activity captured')],{})]
+        self.fill('agent-actions',rows)
 
     def show_activity(self):
         item=self.table_data.get('activity-table',{}).get(self.selected_activity)
@@ -1345,9 +1382,13 @@ class ObservatoryApp(App):
         if not item:
             if 'activity' in self.errors_only:
                 self.inspect('activity-detail','No failed events',[],[('Errors filter','No failures in the current results. Turn off Errors to see all activity.')]);return
+            if self.prompts_only:
+                self.inspect('activity-detail','No user prompts in this scope',[],[('Prompts','No user prompts were recorded for this agent in the selected history. Choose another session or turn off Prompts to see all activity.')]);return
             self.inspect('activity-detail','No activity in this scope',[],[('Scope','Choose another agent session or clear the search to view recent activity.')]);return
         details=decode(item.get('detail') or '')
         sections=list(details.items()) if isinstance(details,dict) else [('Recorded content',details)]
+        if item.get('metadata'):
+            sections.append(('Runtime metadata',item['metadata']))
         self.inspect('activity-detail',headline(item),[('Agent',item.get('service')),('Type',item.get('domain')),('Result',str(status(item.get('result')))),
             ('When',when(item['time_unix_nano'])),('Duration',timing(item.get('duration_ms')))],
             sections+[('Source',item.get('source')),('Trace ID',item.get('trace_id')),('Span ID',item.get('span_id'))])
@@ -1373,13 +1414,37 @@ class ObservatoryApp(App):
                 note='Calls identified as Model Context Protocol appear here. Other tool activity remains in Activity.'
             self.inspect('mcp-detail',title,[('Scope',self.scope_label())],[('How to proceed',note)])
             return
-        self.inspect('mcp-detail',item['server']+' / '+item['tool'],[
+        operation=item.get('tool') if item.get('tool') not in ('', 'Not reported') else item.get('method') or 'MCP operation'
+        self.inspect('mcp-detail',item['server']+' / '+operation,[
             ('Result',str(status(item.get('status')))+' · '+timing(item.get('duration_ms'))),
             ('Agent',(item.get('service') or 'Not reported')+' · '+str(item.get('session_id') or 'Unknown session')[-12:]),
             ('Method',item.get('method') or 'Not reported'),('Observed',when(item.get('time_unix_nano') or 0))],
             [('Arguments',item.get('arguments')),('Response',item.get('output')),
+             ('Runtime metadata',item.get('metadata')),
              ('Evidence',item.get('source')),('Session ID',item.get('session_id')),
              ('Trace ID',item.get('trace_id') or 'Not linked'),('Span ID',item.get('span_id') or 'Not linked')])
+
+    def show_finding(self):
+        item=self.table_data.get('finding-table',{}).get(self.selected_finding)
+        self.query_one('#finding-trace',Button).disabled=not bool(item and item.get('trace_id'))
+        if not item:
+            paging=self.data.pagination.get('findings',{})
+            note=('No findings in this page. Use Older to inspect earlier findings.'
+                  if paging.get('page',1)>1 else
+                  'Recorded security, policy, tool, and run findings appear here with links to their evidence.')
+            self.inspect('finding-detail','No findings match this view',[],[('Coverage',note)])
+            return
+        evidence='\n'.join(f"{entry.get('type','evidence')} · {entry.get('id','not reported')}"
+                           for entry in item.get('evidence',[])) or 'No linked evidence was recorded.'
+        self.inspect('finding-detail',item.get('title') or 'Review finding',[
+            ('Severity',str(item.get('severity') or 'Not reported').upper()),
+            ('Type',item.get('kind') or 'Not reported'),
+            ('Last observed',when(item.get('time_unix_nano') or 0)),
+            ('Occurrences',f"{number(item.get('occurrence_count',1))} across {number(item.get('trace_count',1))} traces · {number(item.get('session_count',0))} sessions"),
+            ('Agent / session',(item.get('services') or ['Not reported'])[0]+' · '+str(item.get('session_id') or 'Not reported')),
+            ('Task',item.get('task') or 'Not reported')],
+            [('What was observed',item.get('detail') or 'No additional detail reported.'),
+             ('Evidence',evidence),('Trace ID',item.get('trace_id') or 'Not linked')])
 
     def show_spans(self):
         detail=self.data.detail
@@ -1404,7 +1469,7 @@ class ObservatoryApp(App):
                 if parent and parent not in nodes and any(span['span_id']==parent for span in spans):remaining.append(item);continue
                 attrs=item['attributes'];kind='MCP' if attrs.get('mcp.server.name') or attrs.get('mcp.tool.name') else 'MODEL' if attrs.get('gen_ai.operation.name')=='chat' or 'gen_ai.usage.input_tokens' in attrs else 'TOOL' if attrs.get('tool.name') else 'RUN'
                 duration=None if attrs.get('observatory.duration_unknown') else (item['end_unix_nano']-item['start_unix_nano'])/1e6
-                label=Text(f"{kind:5} ",style='#92b9eb');label.append(clean(item['name']));label.append(' · '+timing(duration),style='dim')
+                label=Text(f"{kind:5} ",style='#a8ddeb');label.append(clean(item['name']));label.append(' · '+timing(duration),style='dim')
                 if item['status']=='ERROR':label.append(' · ERROR',style='bold red')
                 nodes[item['span_id']]=(nodes.get(parent) or tree.root).add(label,data=item,expand=True)
             if not remaining:break
@@ -1429,22 +1494,14 @@ class ObservatoryApp(App):
 
     @on(DataTable.RowHighlighted)
     def row_highlighted(self,event):
-        if event.data_table.id in self.control_tables:
-            item=self.control_tables[event.data_table.id].get(event.row_key.value)
-            if item:
-                if event.data_table.id=='control-sessions':
-                    self.selected_control_session=self.control_session_key(item)
-                    self.selected_control_request=''
-                else:
-                    self.selected_control_request=str(item.get('id') or '')
-                self.render_control_detail()
-            return
         item=self.valid_row(event)
         if not item:return
         name=event.data_table.id
         if name=='agent-table':self.selected_source=item['id'];self.show_agent()
         elif name=='activity-table':self.selected_activity=event.row_key.value;self.show_activity()
         elif name=='mcp-table':self.selected_mcp=item['id'];self.show_mcp()
+        elif name=='finding-table':self.selected_finding=item['id'];self.show_finding()
+        elif name=='metrics-table':self.selected_metric=event.row_key.value;self.last_update=-1;self.refresh_data()
         elif name=='trace-table':
             if self.feed.pinned_trace and self.data.detail.get('trace_id')!=self.feed.selected_trace:return
             if self.feed.selected_trace!=item['trace_id']:
@@ -1454,9 +1511,6 @@ class ObservatoryApp(App):
 
     @on(DataTable.RowSelected)
     def row_selected(self,event):
-        if event.data_table.id in self.control_tables:
-            self.row_highlighted(event)
-            return
         item=self.valid_row(event)
         if not item:return
         if event.data_table.id=='mcp-servers':
@@ -1472,8 +1526,14 @@ class ObservatoryApp(App):
             self.selected_activity=item.get('id') or item['source_id'];self.action_page('activity');self.show_activity()
         elif event.data_table.id=='activity-table':self.query_one('#activity-detail',RichLog).focus()
         elif event.data_table.id=='mcp-table':self.query_one('#mcp-detail',RichLog).focus()
+        elif event.data_table.id=='finding-table':self.query_one('#finding-detail',RichLog).focus()
         elif event.data_table.id=='trace-table':self.query_one('#span-tree',Tree).focus()
         elif event.data_table.id=='host-table':self.query_one('#host-detail',RichLog).focus()
+        elif event.data_table.id=='metrics-table':
+            key=event.row_key.value
+            metric=self.table_data.get('metrics-table',{}).get(key)
+            if metric and self.metric_history_loaded_key!=key:self.request_metric_history(metric,key)
+            self.query_one('#metrics-detail',RichLog).focus()
 
     @on(Tree.NodeHighlighted,'#span-tree')
     def span_highlighted(self,event):
@@ -1505,6 +1565,7 @@ class ObservatoryApp(App):
         self.search_queries[page]=value
         if page=='activity':self.selected_activity=None
         if page=='mcp':self.selected_mcp=None
+        if page=='findings':self.selected_finding=None
         if page in self.search_timers:self.search_timers.pop(page).stop()
         def apply():
             if not self.query('#health'):return
@@ -1528,28 +1589,33 @@ class ObservatoryApp(App):
     @on(TabbedContent.TabActivated,'#pages')
     def page_activated(self,event):
         self.screen.set_class(event.pane.has_class('expanded'),'inspecting')
-        self.screen.set_class(event.pane.id=='control','control-mode')
 
     @on(Button.Pressed)
     def button_pressed(self,event):
-        if event.button.id=='control-start':self.launch_control_agent()
-        elif event.button.id=='control-approve-once':
-            request=self.control_tables['control-requests'].get(self.selected_control_request)
-            if request:self.send_control_reply('accept' if request.get('runtime')=='Codex' else 'once')
-        elif event.button.id=='control-approve-always':self.send_control_reply('always')
-        elif event.button.id=='control-deny':
-            request=self.control_tables['control-requests'].get(self.selected_control_request)
-            if request:self.send_control_reply('decline' if request.get('runtime')=='Codex' else 'reject')
-        elif event.button.id=='control-answer-send':self.send_control_reply(answer=True)
-        elif event.button.id=='control-summary':self.summarize_control_session()
-        elif event.button.id=='pause':self.action_pause()
+        if event.button.id=='pause':self.action_pause()
         elif event.button.id=='history-back':self.action_history_back()
         elif event.button.id.startswith(('older-','newer-','latest-')):
             direction,page=event.button.id.split('-',1)
             self.action_history(direction,page)
         elif event.button.id.startswith('expand-'):self.action_expand()
+        elif event.button.id=='prompts-activity':
+            self.prompts_only=not self.prompts_only
+            self.feed.activity_prompts=self.prompts_only
+            self.selected_activity=None
+            button=event.button
+            button.set_class(self.prompts_only,'-on')
+            button.label='Prompts ●' if self.prompts_only else 'Prompts'
+            if self.prompts_only and 'activity' in self.errors_only:
+                self.errors_only.remove('activity')
+                errors=self.query_one('#errors-activity',Button)
+                errors.remove_class('-on');errors.label='Errors'
+            self.last_update=-1;self.feed.request_refresh();self.refresh_data()
         elif event.button.id.startswith('errors-'):
             page=event.button.id.removeprefix('errors-')
+            if page=='activity' and self.prompts_only:
+                self.prompts_only=False;self.feed.activity_prompts=False
+                prompts=self.query_one('#prompts-activity',Button)
+                prompts.remove_class('-on');prompts.label='Prompts'
             if page=='activity':self.selected_activity=None
             if page=='mcp':self.selected_mcp=None
             if page in self.errors_only:self.errors_only.remove(page)
@@ -1562,8 +1628,8 @@ class ObservatoryApp(App):
             field.value='';field.focus()
         elif event.button.id=='agent-open':self.action_focus_agent()
         elif event.button.id=='agent-summary':self.request_ai_summary()
-        elif event.button.id in {'activity-trace','mcp-trace'}:self.action_open_trace()
-        elif event.button.id in {'activity-copy','mcp-copy'}:self.action_copy()
+        elif event.button.id in {'activity-trace','mcp-trace','metrics-trace','finding-trace'}:self.action_open_trace()
+        elif event.button.id in {'activity-copy','mcp-copy','metrics-copy','finding-copy'}:self.action_copy()
 
     def request_ai_summary(self):
         from .ai_summary import SummaryConfig, SummaryError
@@ -1581,7 +1647,11 @@ class ObservatoryApp(App):
         self.summary_busy=True
         self.query_one('#agent-summary',Button).label='Summarizing…'
         self.show_agent()
-        self.summarize_agent(dict(item),config)
+        aggregate=next((dict(row) for row in self.data.sessions
+                        if item.get('session_id') and row.get('session_id')==item.get('session_id')),{})
+        summary_item=dict(item)
+        summary_item['telemetry_totals']=aggregate
+        self.summarize_agent(summary_item,config)
 
     @work(group='ai-summary')
     async def summarize_agent(self,item,config):
@@ -1644,11 +1714,12 @@ class ObservatoryApp(App):
         page=page or self.query_one('#pages',TabbedContent).active
         if page not in self.feed.history:return
         self.screen.clear_selection()
-        old=self.selected_activity,self.selected_mcp
+        old=self.selected_activity,self.selected_mcp,self.selected_finding
         if page=='activity':self.selected_activity=None
         if page=='mcp':self.selected_mcp=None
+        if page=='findings':self.selected_finding=None
         if not self.feed.navigate_history(page,direction):
-            self.selected_activity,self.selected_mcp=old
+            self.selected_activity,self.selected_mcp,self.selected_finding=old
             return
         self.last_update=-1;self.refresh_data()
 
@@ -1675,12 +1746,21 @@ class ObservatoryApp(App):
             item=self.table_data.get('mcp-table',{}).get(self.selected_mcp)
         elif page=='activity':
             item=self.table_data.get('activity-table',{}).get(self.selected_activity)
+        elif page=='findings':
+            item=self.table_data.get('finding-table',{}).get(self.selected_finding)
+            if item:
+                self.copy_to_clipboard(json.dumps(item,ensure_ascii=False,indent=2));return
+        elif page=='metrics':
+            item=self.table_data.get('metrics-table',{}).get(self.selected_metric)
+            if item:
+                self.copy_to_clipboard(json.dumps(item,ensure_ascii=False,indent=2));return
+            self.notify('Select a metric instrument to copy.');return
         else:
-            name={'agents':'agent-detail','traces':'span-info','host':'host-detail','output':'agent-output'}[page]
+            name={'agents':'agent-detail','traces':'span-info','host':'host-detail'}[page]
             self.copy_to_clipboard(self.query_one('#'+name,SelectableRichLog).plain_text)
             return
         if not item:
-            self.notify('Select an activity or MCP call to copy.')
+            self.notify('Select an activity, MCP operation, or finding to copy.')
             return
         self.copy_to_clipboard(copy_event_text(item))
     def collapse(self,page):
@@ -1698,7 +1778,7 @@ class ObservatoryApp(App):
         self.screen.add_class('inspecting')
         self.call_after_refresh(self.reflow_inspectors)
         for button in self.query('#'+page+' .expand-button'):button.label=Text('Back · e')
-        target={'agents':'agent-detail','activity':'activity-detail','mcp':'mcp-detail','traces':'span-tree','host':'host-detail'}[page]
+        target={'agents':'agent-detail','activity':'activity-detail','mcp':'mcp-detail','traces':'span-tree','host':'host-detail','metrics':'metrics-detail','findings':'finding-detail'}[page]
         self.query_one('#'+target).focus()
         self.notify('Expanded detail · Esc to return',timeout=2)
     def action_focus_agent(self):
@@ -1707,31 +1787,70 @@ class ObservatoryApp(App):
             self.action_page('activity')
     def action_reviews(self):self.query_one('#reviews',Checkbox).toggle()
     def action_all(self):
-        self.selected_activity=self.selected_mcp=None
+        self.selected_activity=self.selected_mcp=self.selected_finding=None
         self.query_one('#scope',Select).value='all'
         self.errors_only.clear()
+        self.prompts_only=False;self.feed.activity_prompts=False
         for button in self.query('.error-filter'):
             button.remove_class('-on');button.label='Errors'
+        prompt_button=self.query_one('#prompts-activity',Button)
+        prompt_button.remove_class('-on');prompt_button.label='Prompts'
         for page in self.search_queries:self.query_one('#search-'+page,Input).value=''
         self.last_update=-1;self.refresh_data()
     def action_page(self,page):
-        if page=='output' and not self.agent:return
         self.screen.clear_selection()
         self.collapse(page)
         self.query_one('#pages',TabbedContent).active=page
-        if page=='control':
-            self.query_one('#control-prompt',TextArea).focus()
-            return
-        target={'agents':'agent-table','activity':'activity-table','mcp':'mcp-table','traces':'trace-table','host':'host-table','output':'agent-output'}[page]
+        target={'agents':'agent-table','activity':'activity-table','mcp':'mcp-table','traces':'trace-table','host':'host-table','metrics':'metrics-table','findings':'finding-table'}[page]
         self.query_one('#'+target).focus()
-    def action_browser(self):webbrowser.open(self.feed.api.endpoint)
     def action_open_trace(self):
         page=self.query_one('#pages',TabbedContent).active
-        if page not in {'activity','mcp'}:return
-        item=self.table_data.get('mcp-table',{}).get(self.selected_mcp) if page=='mcp' else self.table_data.get('activity-table',{}).get(self.selected_activity)
+        if page=='metrics':
+            points=self.metric_history_points or self.data.metric_points
+            exemplar=next((exemplar for point in points
+                for exemplar in ((point.get('data') or {}).get('exemplars') or [])
+                if exemplar.get('trace_id')),None)
+            item={'trace_id':exemplar.get('trace_id'),'span_id':exemplar.get('span_id')} if exemplar else None
+        elif page in {'activity','mcp','findings'}:
+            item=(self.table_data.get('mcp-table',{}).get(self.selected_mcp) if page=='mcp' else
+                  self.table_data.get('activity-table',{}).get(self.selected_activity) if page=='activity' else
+                  self.table_data.get('finding-table',{}).get(self.selected_finding))
+            if page=='findings' and item:
+                span_id=next((entry.get('id') for entry in item.get('evidence',[])
+                              if entry.get('type')=='span'),None)
+                item={**item,'span_id':span_id}
+        else:return
         if not item or not item.get('trace_id'):
             self.notify('This action has no linked trace.');return
         self.remember_location()
         self.jump_span=item.get('span_id')
         self.feed.selected_span_id=self.jump_span
         self.feed.selected_trace=item['trace_id'];self.feed.pinned_trace=True;self.feed.request_refresh();self.action_page('traces')
+
+    @work(group='metric-history',exclusive=True,thread=True)
+    def load_metric_history(self,metric,key):
+        try:
+            points=self.feed.metric_history(metric,100)
+        except Exception as exc:
+            try:self.call_from_thread(self.finish_metric_history,key,None,clean(exc))
+            except RuntimeError:pass
+            return
+        try:self.call_from_thread(self.finish_metric_history,key,points,'')
+        except RuntimeError:pass
+
+    def request_metric_history(self,metric,key):
+        self.metric_history_requested_key=key
+        self.metric_history_points=[]
+        self.load_metric_history(metric,key)
+
+    def finish_metric_history(self,key,points,error):
+        if self.metric_history_requested_key!=key:return
+        if error:
+            self.metric_history_loaded_key=key
+            self.metric_history_points=[]
+            self.notify('Could not load metric history: '+error,severity='warning')
+            return
+        self.metric_history_points=points or []
+        self.metric_history_loaded_key=key
+        self.last_update=-1
+        self.refresh_data()

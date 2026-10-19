@@ -8,6 +8,27 @@ import time
 from pathlib import Path
 
 
+def project_directories(names, proc_root=Path('/proc'), uid=None):
+    """Return working directories for selected same-user processes, for local discovery only."""
+    user_id = os.getuid() if uid is None else uid
+    wanted = {str(name).casefold() for name in names}
+    result = set()
+    if not Path(proc_root).is_dir():
+        return result
+    for proc in Path(proc_root).iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if proc.stat().st_uid != user_id or (proc / 'comm').read_text().strip().casefold() not in wanted:
+                continue
+            cwd = Path(os.readlink(proc / 'cwd'))
+            if cwd.is_absolute() and cwd.is_dir():
+                result.add(str(cwd))
+        except OSError:
+            continue
+    return result
+
+
 def snapshot():
     result = {"host": socket.gethostname(), "os": platform.system(), "architecture": platform.machine(),
               "collector_pid": os.getpid(), "processes": [], "process_inventory_available": Path('/proc').is_dir()}

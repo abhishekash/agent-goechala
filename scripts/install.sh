@@ -9,5 +9,5 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-uv tool install --upgrade "$REPO_ROOT"
-printf '\n%s\n' 'Installed agent-observatory. Run: agent-observatory'
+uv tool install --upgrade --force "$REPO_ROOT"
+printf '\n%s\n' 'Installed agent-goechala. Run: agent-goechala'

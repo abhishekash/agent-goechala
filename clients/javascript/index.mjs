@@ -39,7 +39,7 @@ export class Client {
         method: 'POST', headers, body: JSON.stringify(payload),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-      if (!response.ok) throw new Error(`Observatory returned HTTP ${response.status}`);
+      if (!response.ok) throw new Error(`Goechala returned HTTP ${response.status}`);
       this.lastError = null;
       return true;
     } catch (error) {

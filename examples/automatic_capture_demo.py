@@ -77,7 +77,7 @@ def main():
         response = client.messages.create(model="local-anthropic-chat", max_tokens=40,
             messages=[{"role":"user","content":"Replay an Anthropic answer."}])
         print(response.content[0].text)
-    print("Finished. Open Observatory to inspect the automatic spans and token counts.")
+    print("Finished. Run agent-goechala to inspect the captured spans and token counts.")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""OpenAI Agents SDK tracing exporter for Observatory."""
+"""OpenAI Agents SDK tracing exporter for Goechala."""
 from __future__ import annotations
 
 import hashlib
@@ -13,14 +13,16 @@ try:
 except ImportError as exc:  # pragma: no cover - optional integration dependency
     raise ImportError(
         "OpenAIAgentsExporter requires the optional dependency: "
-        "pip install 'agent-observatory-cli[openai-agents]'"
+        "pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'"
     ) from exc
 
 
 _SAFE_TEXT_KEYS = {"type", "name", "model", "model_name", "model_id", "provider",
                    "agent_name", "tool_name", "handoff_name", "operation"}
 _TOKEN_KEYS = {"input_tokens", "output_tokens", "prompt_tokens", "completion_tokens",
-               "total_tokens", "cached_input_tokens", "reasoning_tokens"}
+               "total_tokens", "cached_input_tokens", "cache_read_input_tokens",
+               "cache_creation_input_tokens", "cache_write_input_tokens",
+               "reasoning_tokens", "reasoning_output_tokens"}
 
 
 def _stable_id(value: Any, length: int) -> str:
@@ -68,7 +70,14 @@ def _safe_attributes(data: Any, span_kind: str, exported=None) -> dict[str, Any]
                     result[f"openai_agents.{prefix}{key}"] = item
             elif (span_kind == "generation" and normalized in _TOKEN_KEYS and
                   isinstance(item, (int, float)) and not isinstance(item, bool) and item >= 0):
-                token_name = {"prompt_tokens": "input_tokens", "completion_tokens": "output_tokens"}.get(normalized, normalized)
+                token_name = {
+                    "prompt_tokens": "input_tokens", "completion_tokens": "output_tokens",
+                    "cached_input_tokens": "cache_read.input_tokens",
+                    "cache_read_input_tokens": "cache_read.input_tokens",
+                    "cache_creation_input_tokens": "cache_write.input_tokens",
+                    "cache_write_input_tokens": "cache_write.input_tokens",
+                    "reasoning_output_tokens": "reasoning_tokens",
+                }.get(normalized, normalized)
                 result[f"gen_ai.usage.{token_name}"] = int(item)
 
     visit(exported)
@@ -86,7 +95,7 @@ def _bounded_content(value: Any, max_chars: int) -> str:
 
 
 class OpenAIAgentsExporter(TracingExporter):
-    """Export OpenAI Agents SDK spans to an Observatory :class:`Client`.
+    """Export OpenAI Agents SDK spans to an Goechala :class:`Client`.
 
     Pass this exporter to the SDK's ``BatchTraceProcessor`` and register that
     processor with ``agents.tracing.add_trace_processor``. Span input/output
@@ -164,13 +173,13 @@ class OpenAIAgentsExporter(TracingExporter):
 
 def create_processor(client, *, capture_content=False, max_content_chars=4000,
                      **processor_options):
-    """Create the SDK's background batching processor for this Observatory client."""
+    """Create the SDK's background batching processor for this Goechala client."""
     try:
         from agents.tracing.processors import BatchTraceProcessor
     except ImportError as exc:  # pragma: no cover - optional integration dependency
         raise ImportError(
             "create_processor requires the optional dependency: "
-            "pip install 'agent-observatory-cli[openai-agents]'"
+            "pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'"
         ) from exc
     exporter = OpenAIAgentsExporter(client, capture_content=capture_content,
                                     max_content_chars=max_content_chars)

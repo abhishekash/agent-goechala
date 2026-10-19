@@ -1,11 +1,14 @@
 """Native session records must preserve MCP identity and call lifecycle."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from observatory.core import Store
-from observatory.local_agents import Session
+from observatory.local_agents import LocalAgents, Session, discover_mcp_configurations
+from observatory.local_runtime import project_directories
 
 
 class NativeSessionTests(unittest.TestCase):
@@ -20,12 +23,135 @@ class NativeSessionTests(unittest.TestCase):
         path.touch()
         return Session(self.store, path, runtime, capture_details=details)
 
+    def test_mcp_configuration_inventory_reads_names_only_across_client_formats(self):
+        codex = self.root / 'config.toml'
+        claude = self.root / '.mcp.json'
+        cursor_dir = self.root / '.cursor'
+        vscode_dir = self.root / '.vscode'
+        gemini_dir = self.root / '.gemini'
+        opencode_dir = self.root / 'opencode-global'
+        cursor_dir.mkdir(); vscode_dir.mkdir(); gemini_dir.mkdir(); opencode_dir.mkdir()
+        codex.write_text('[mcp_servers.github]\ncommand = "secret-command"\nargs = ["private-argument"]\n')
+        claude.write_text(json.dumps({'mcpServers': {'linear': {'command': 'private'}}}))
+        (cursor_dir / 'mcp.json').write_text(json.dumps({'mcpServers': {'docs': {'url': 'https://secret'}}}))
+        (vscode_dir / 'mcp.json').write_text(json.dumps({'servers': {'db': {'env': {'TOKEN': 'secret'}}}}))
+        (gemini_dir / 'settings.json').write_text(json.dumps({'mcpServers': {'calendar': {'command': 'private'}}}))
+        opencode_jsonc = opencode_dir / 'opencode.jsonc'
+        opencode_jsonc.write_text('''{
+          // OpenCode v1 format; comment markers in strings are not comments.
+          "mcp": {
+            "docs": {"type": "remote", "url": "https://example.test/mcp",},
+          },
+        }''')
+        (self.root / 'opencode.json').write_text(json.dumps({'mcp': {'servers': {
+            'v2-server': {'type': 'remote', 'url': 'https://private.example'}}}}))
+        result = discover_mcp_configurations(
+            global_paths=[(codex, 'Codex', 'User'), (opencode_jsonc, 'OpenCode', 'User')],
+            project_directories=[self.root])
+        self.assertEqual({(item['client'], item['server']) for item in result}, {
+            ('Codex', 'github'), ('Claude Code', 'linear'), ('Cursor', 'docs'),
+            ('Gemini CLI', 'calendar'), ('VS Code', 'db'), ('OpenCode', 'docs'),
+            ('OpenCode', 'v2-server')})
+        self.assertNotIn('secret', json.dumps(result))
+        self.assertNotIn('example.test', json.dumps(result))
+
+    def test_mcp_configuration_inventory_ignores_malformed_and_oversized_files(self):
+        malformed = self.root / 'broken.json'
+        malformed.write_text('{broken')
+        oversized = self.root / 'large.toml'
+        oversized.write_text('x' * (1024 * 1024 + 1))
+        errors = []
+        self.assertEqual(discover_mcp_configurations(
+            global_paths=[(malformed, 'Claude Code', 'User'), (oversized, 'Codex', 'User')],
+            on_error=lambda: errors.append('invalid')), [])
+        self.assertEqual(len(errors), 2)
+
+    def test_opencode_global_config_environment_overrides(self):
+        config_dir = self.root / 'custom-opencode'
+        config_dir.mkdir()
+        (config_dir / 'opencode.jsonc').write_text('{"mcp":{"global-docs":{"type":"remote"}}}')
+        with patch.dict(os.environ, {'OPENCODE_CONFIG_DIR': str(config_dir),
+                                     'OPENCODE_CONFIG': '', 'XDG_CONFIG_HOME': str(self.root / 'xdg')}):
+            result = discover_mcp_configurations(global_paths=None, project_directories=[])
+        self.assertIn(('OpenCode', 'User', 'global-docs'),
+                      {(item['client'], item['scope'], item['server']) for item in result})
+
+    def test_copilot_cli_global_mcp_config_uses_copilot_home_and_retains_names_only(self):
+        copilot_home = self.root / 'copilot-home'
+        copilot_home.mkdir()
+        (copilot_home / 'mcp-config.json').write_text(json.dumps({'mcpServers': {
+            'issues': {'command': 'private-command', 'env': {'TOKEN': 'secret'}},
+            'docs': {'url': 'https://private.example/mcp'}}}))
+        with patch.dict(os.environ, {'COPILOT_HOME': str(copilot_home)}):
+            result = discover_mcp_configurations(global_paths=None, project_directories=[])
+        self.assertIn(('GitHub Copilot CLI', 'User', 'issues'),
+                      {(item['client'], item['scope'], item['server']) for item in result})
+        self.assertIn(('GitHub Copilot CLI', 'User', 'docs'),
+                      {(item['client'], item['scope'], item['server']) for item in result})
+        serialized = json.dumps(result)
+        self.assertNotIn('private-command', serialized)
+        self.assertNotIn('secret', serialized)
+        self.assertNotIn('private.example', serialized)
+
+    def test_project_directories_come_only_from_selected_same_user_processes(self):
+        proc_root = self.root / 'proc'
+        project = self.root / 'gemini-project'
+        project.mkdir()
+        for pid, name in (("101", "gemini"), ("102", "opencode"), ("202", "python")):
+            process = proc_root / pid
+            process.mkdir(parents=True)
+            (process / 'comm').write_text(name)
+            (process / 'cwd').symlink_to(project)
+        self.assertEqual(project_directories({'gemini', 'opencode'}, proc_root), {str(project)})
+        gemini = project / '.gemini'
+        gemini.mkdir()
+        (gemini / 'settings.json').write_text(json.dumps({'mcpServers': {'workspace-tools': {}}}))
+        inventory = discover_mcp_configurations(global_paths=[],
+            project_directories=project_directories({'gemini', 'opencode'}, proc_root))
+        self.assertEqual([(item['client'], item['scope'], item['server']) for item in inventory],
+                         [('Gemini CLI', 'Project', 'workspace-tools')])
+
+    def test_local_discovery_reports_when_the_recent_session_cap_hides_sources(self):
+        codex_home = self.root / 'codex-home'
+        session_root = codex_home / 'sessions'
+        session_root.mkdir(parents=True)
+        for index in range(52):
+            (session_root / f'{index:03}.jsonl').touch()
+        agents = LocalAgents(self.store)
+        with patch.dict(os.environ, {'CODEX_HOME': str(codex_home),
+                                     'CLAUDE_CONFIG_DIR': str(self.root / 'claude-home')}):
+            agents.discover()
+        self.assertEqual(agents.discovered_sources, 52)
+        self.assertEqual(agents.omitted_sources, 2)
+        self.assertEqual(len(agents.sessions), 50)
+
     def append(self, session, *rows):
         with session.path.open("a") as stream:
             for row in rows:
                 stream.write(json.dumps(row) + "\n")
         session.poll()
         self.assertEqual(session.skipped, 0)
+
+    def test_native_model_spans_keep_reported_usage_breakdowns_only(self):
+        codex = self.session("Codex")
+        codex_span = codex.model_span(("usage", "codex"), {
+            "input_tokens": 80, "output_tokens": 25, "cached_input_tokens": 12,
+            "reasoning_output_tokens": 6}, 100)
+        codex_attrs = codex_span["attributes"]
+        self.assertEqual(codex_attrs["gen_ai.usage.input_tokens"], 80)
+        self.assertEqual(codex_attrs["gen_ai.usage.cache_read.input_tokens"], 12)
+        self.assertEqual(codex_attrs["gen_ai.usage.reasoning_tokens"], 6)
+        self.assertNotIn("gen_ai.usage.cache_write.input_tokens", codex_attrs)
+
+        claude = self.session("Claude Code")
+        claude_span = claude.model_span(("usage", "claude"), {
+            "input_tokens": 70, "output_tokens": 15, "cache_read_input_tokens": 20,
+            "cache_creation_input_tokens": 5, "reasoning_tokens": 3}, 100, claude=True)
+        claude_attrs = claude_span["attributes"]
+        self.assertEqual(claude_attrs["gen_ai.usage.input_tokens"], 95)
+        self.assertEqual(claude_attrs["gen_ai.usage.cache_read.input_tokens"], 20)
+        self.assertEqual(claude_attrs["gen_ai.usage.cache_write.input_tokens"], 5)
+        self.assertEqual(claude_attrs["gen_ai.usage.reasoning_tokens"], 3)
 
     def claude(self, kind, content, second, **extra):
         return {"type": kind, "timestamp": f"2026-10-15T12:00:{second:02d}Z",

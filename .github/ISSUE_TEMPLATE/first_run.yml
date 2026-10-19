@@ -4,7 +4,7 @@ title: "First run: "
 body:
   - type: markdown
     attributes:
-      value: "Thanks for trying Agent Observatory. Share redacted excerpts; session logs can contain prompts and credentials."
+      value: "Thanks for trying Agent Goechala. Share redacted excerpts; session logs can contain prompts and credentials."
   - type: textarea
     id: goal
     attributes:
@@ -23,4 +23,4 @@ body:
     id: environment
     attributes:
       label: Environment
-      placeholder: "OS, terminal, Python version, Observatory version, and install command."
+      placeholder: "OS, terminal, Python version, Goechala version, and install command."

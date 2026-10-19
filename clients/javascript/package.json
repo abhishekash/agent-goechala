@@ -1,7 +1,7 @@
 {
-  "name": "@agent-observatory/client",
+  "name": "@agent-goechala/client",
   "version": "0.1.0",
-  "description": "Dependency-free Node.js instrumentation client for Agent Observatory",
+  "description": "Dependency-free Node.js instrumentation client for Agent Goechala",
   "type": "module",
   "exports": {
     ".": {

@@ -39,3 +39,80 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: node --check clients/javascript/index.mjs
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install .
+      - run: python -m unittest tests.test_javascript_client_e2e -v
+
+  otlp-interoperability:
+    name: OpenTelemetry OTLP end-to-end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install '.[auto]'
+      - run: python -m unittest tests.test_otel_export_e2e -v
+
+  pydantic-ai-interoperability:
+    name: Pydantic AI native instrumentation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install '.[auto]' 'pydantic-ai>=2,<3'
+      - run: python -m unittest tests.test_pydantic_ai_otel_e2e -v
+
+  google-adk-interoperability:
+    name: Google ADK OTLP interoperability
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install '.[auto]' 'google-adk[mcp]>=1.17,<3'
+      - run: python -m unittest tests.test_google_adk_otel_e2e -v
+
+  openai-agents-interoperability:
+    name: OpenAI Agents SDK local tracing
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install '.[openai-agents]'
+      - run: python -m unittest tests.test_openai_agents_export_e2e -v
+
+  langchain-interoperability:
+    name: LangChain callback interoperability
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install '.[langchain]'
+      - run: python -m unittest tests.test_langchain_callback_e2e -v
+
+  automatic-capture-interoperability:
+    name: Automatic SDK capture through CLI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install '.[auto]' 'openai>=1.68,<3' 'anthropic>=1.8,<2' 'langchain-core>=0.3.9,<2'
+      - run: python -m unittest tests.test_auto_launcher_e2e -v

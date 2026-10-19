@@ -1,250 +1,121 @@
-"""Create a captioned, camera-moved product walkthrough from Textual SVG captures.
+"""Build the branded README walkthrough from actual Textual SVG captures.
 
-Dependencies: Pillow, CairoSVG, imageio-ffmpeg.
+Requires Pillow, CairoSVG, and imageio-ffmpeg. Frames are streamed to the encoder
+so a full-HD video does not require keeping hundreds of images in memory.
 """
-
 import argparse
 from io import BytesIO
 from pathlib import Path
-
 import cairosvg
 from imageio_ffmpeg import write_frames
 from PIL import Image, ImageDraw, ImageFont
 
-
+ROOT = Path(__file__).resolve().parents[1]
 WIDTH, HEIGHT, FPS = 1920, 1080, 24
-BG = (8, 13, 21)
-WHITE = (240, 246, 252)
-MUTED = (194, 208, 224)
-TEAL = (73, 229, 198)
-FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
-REF_WIDTH, REF_HEIGHT = 1600, 1015
-CAPTURE_WIDTH, CAPTURE_HEIGHT = 1920, 1076
-FIT_SCALE = HEIGHT / CAPTURE_HEIGHT
-APP_X = round((WIDTH - CAPTURE_WIDTH * FIT_SCALE) / 2)
-
-
-def font(size, mono=False, bold=False):
-    name = "DejaVuSansMono" if mono else "DejaVuSans"
-    if bold:
-        name += "-Bold"
-    return ImageFont.truetype(str(FONT_DIR / f"{name}.ttf"), size)
-
-
-def capture(path):
-    svg = path.read_text().replace("Fira Code", "DejaVu Sans Mono").replace(
-        "FiraCode", "DejaVu Sans Mono")
-    png = cairosvg.svg2png(bytestring=svg.encode(), output_width=CAPTURE_WIDTH)
-    return Image.open(BytesIO(png)).convert("RGB")
-
-
-def base_screen(source):
-    frame = Image.new("RGB", (WIDTH, HEIGHT), BG)
-    scaled = source.resize((round(source.width * FIT_SCALE), HEIGHT),
-                           Image.Resampling.LANCZOS)
-    frame.paste(scaled, (APP_X, 0))
-    return frame
-
-
-def map_point(x, y, zoom, crop_left, crop_top):
-    source_x = x * CAPTURE_WIDTH / REF_WIDTH
-    source_y = y * CAPTURE_HEIGHT / REF_HEIGHT
-    return (round((APP_X + source_x * FIT_SCALE) * zoom - crop_left),
-            round(source_y * FIT_SCALE * zoom - crop_top))
-
-
-def map_box(box, zoom, crop_left, crop_top):
-    x1, y1 = map_point(box[0], box[1], zoom, crop_left, crop_top)
-    x2, y2 = map_point(box[2], box[3], zoom, crop_left, crop_top)
-    return x1, y1, x2, y2
-
-
-def caption_overlay(frame, headline, supporting=None, final=False):
-    overlay = Image.new("RGBA", frame.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(overlay)
-    d.rectangle((0, 932, WIDTH, HEIGHT), fill=(5, 11, 18, 204))
-    d.rectangle((67, 954, 72, 1042), fill=TEAL)
-    d.text((98, 951), headline, font=font(32, bold=True), fill=WHITE)
-    if supporting:
-        d.text((100, 1000), supporting,
-               font=font(22, mono=final), fill=TEAL if final else MUTED)
-    return Image.alpha_composite(frame.convert("RGBA"), overlay).convert("RGB")
-
-
-def draw_pointer(frame, point, click_strength=0):
-    x, y = point
-    d = ImageDraw.Draw(frame, "RGBA")
-    if click_strength:
-        radius = 19 + int((1 - click_strength) * 20)
-        d.ellipse((x-radius, y-radius, x+radius, y+radius),
-                  outline=(73, 229, 198, int(180 * click_strength)), width=3)
-    # Small white mouse pointer with a dark edge remains visible over the UI.
-    tip = (x, y)
-    points = [tip, (x+2, y+25), (x+8, y+19), (x+15, y+31),
-              (x+20, y+28), (x+13, y+16), (x+22, y+15)]
-    d.polygon(points, fill=(248, 251, 255, 255), outline=(4, 8, 13, 255))
-    d.line(points + [tip], fill=(4, 8, 13, 255), width=2, joint="curve")
-
-
-def camera_frame(base, source_target, zoom, headline, supporting, pointer,
-                 click_strength=0, highlight=None, final=False):
-    target_x, target_y = source_target
-    source_x = target_x * CAPTURE_WIDTH / REF_WIDTH
-    source_y = target_y * CAPTURE_HEIGHT / REF_HEIGHT
-    focus_x, focus_y = APP_X + source_x * FIT_SCALE, source_y * FIT_SCALE
-    scaled_width, scaled_height = round(WIDTH * zoom), round(HEIGHT * zoom)
-    crop_left = max(0, min(round(focus_x * zoom - WIDTH / 2), scaled_width - WIDTH))
-    crop_top = max(0, min(round(focus_y * zoom - HEIGHT / 2), scaled_height - HEIGHT))
-    scaled = base.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
-    frame = Image.new("RGB", (WIDTH, HEIGHT), BG)
-    frame.paste(scaled, (-crop_left, -crop_top))
-    if highlight:
-        rect = map_box(highlight, zoom, crop_left, crop_top)
-        d = ImageDraw.Draw(frame, "RGBA")
-        d.rounded_rectangle(rect, radius=10, outline=(73, 229, 198, 235), width=4)
-    if pointer:
-        px, py = map_point(pointer[0], pointer[1], zoom, crop_left, crop_top)
-        draw_pointer(frame, (px, py), click_strength)
-    frame = caption_overlay(frame, headline, supporting, final)
-    return frame
-
-
-def smoothstep(value):
-    value = max(0.0, min(1.0, value))
-    return value * value * (3 - 2 * value)
-
-
-def interpolate(a, b, t):
-    return round(a + (b - a) * smoothstep(t))
-
-
+BG, PANEL, WHITE = '#08121f', '#0d1b2a', '#f2f7fa'
+CYAN, GOLD, MUTED = '#73dce8', '#ffd08a', '#9aafc3'
+FONT_DIR = Path('/usr/share/fonts/truetype/dejavu')
 SCENES = [
-    # page, seconds, caption, supporting text, camera target, zoom,
-    # pointer movements, click times, highlight rectangle
-    ("agents", 5,
-     "Three sessions. Which one needs attention?",
-     "Find the project, status, update time, and latest action.",
-     (800, 440), 1.07,
-     [(0.08, 0.22, (267, 258))], [0.88], (58, 414, 1540, 445)),
-    ("activity", 6,
-     "The last action is a failed GitHub request.",
-     "Activity keeps the error beside the session timeline.",
-     (1170, 540), 1.10,
-     [(0.08, 0.18, (450, 428)), (0.62, 0.75, (395, 258))],
-     [0.24, 0.87], (978, 420, 1540, 853)),
-    ("mcp", 8,
-     "The MCP response explains why the investigation stopped.",
-     "HTTP 403 · API rate limit exceeded · pull request not fetched",
-     (1290, 738), 1.13,
-     [(0.08, 0.17, (520, 596)), (0.30, 0.44, (1280, 790)),
-      (0.68, 0.79, (1240, 913))],
-     [0.25, 0.87], (974, 730, 1547, 855)),
-    ("traces", 6,
-     "Follow the failed span back to its agent run.",
-     "The error is linked to the same trace and task.",
-     (1270, 365), 1.12,
-     [(0.08, 0.19, (1208, 384))], [0.26], (1002, 323, 1540, 400)),
+    ('agents', 5, '01 / OVERVIEW', 'Every session, in one place.',
+     'Codex, Claude Code, and OpenCode. Find the task and its latest recorded progress.', '1  Agents'),
+    ('prompts', 5, '02 / CONTEXT', 'Read the prompts behind the work.',
+     "Focus one agent, then read its user prompts. Keep each session's story together.", 's  Focus agent  /  Prompts'),
+    ('mcp', 4, '03 / TOOLS', 'See which tool call failed.',
+     'Observed MCP calls, their duration, and their outcome. Select a call to investigate.', '3  MCP calls'),
+    ('mcp-detail', 6, '04 / EVIDENCE', 'Open the evidence.',
+     'Arguments and indented JSON. This GitHub request hit an API rate limit.', 'e  Expand'),
+    ('traces', 6, '05 / EXECUTION', 'Follow the call into its execution.',
+     'The agent run, model call, and failed operation are connected in one tree.', 't  Linked trace'),
 ]
 
+def font(size, bold=False, mono=False):
+    family = 'DejaVuSansMono' if mono else 'DejaVuSans'
+    return ImageFont.truetype(str(FONT_DIR / (family + ('-Bold' if bold else '') + '.ttf')), size)
 
-def scene_frames(name, seconds, headline, supporting, target, max_zoom,
-                 pointer_moves, click_times, highlight, source_images, previous_pointer,
-                 final=False):
-    base = base_screen(source_images[name])
-    count = seconds * FPS
-    pointer_start = previous_pointer or (45, 258)
-    frames = []
-    for i in range(count):
-        t = i / max(1, count - 1)
-        # Move the camera in, hold on the evidence, then ease out into the next page.
-        zoom_in = smoothstep(t / 0.24)
-        zoom_out = smoothstep((t - 0.80) / 0.20)
-        zoom = 1.0 + (max_zoom - 1.0) * zoom_in * (1.0 - zoom_out)
-        point = pointer_start
-        for move_start, move_end, destination in pointer_moves:
-            if t >= move_end:
-                point = destination
-            elif t > move_start:
-                p = smoothstep((t - move_start) / (move_end - move_start))
-                point = (interpolate(point[0], destination[0], p),
-                         interpolate(point[1], destination[1], p))
-                break
-            else:
-                break
-        click = max((max(0.0, 1.0 - abs(t - at) / 0.045)
-                     for at in click_times), default=0.0)
-        frame = camera_frame(base, target, zoom, headline, supporting,
-                             point, click, highlight, final)
-        frames.append(frame)
-    return frames, (pointer_moves[-1][2] if pointer_moves else pointer_start)
+def raster(path):
+    svg = path.read_text().replace('Fira Code', 'DejaVu Sans Mono').replace('FiraCode', 'DejaVu Sans Mono')
+    return Image.open(BytesIO(cairosvg.svg2png(bytestring=svg.encode(), output_width=1920))).convert('RGB')
 
+def fitted(source, width, height):
+    image = source.copy()
+    image.thumbnail((width, height), Image.Resampling.LANCZOS)
+    return image
 
-def intro_frame(base):
-    return caption_overlay(base, "See what your coding agent did.",
-                           "Session → MCP call → trace · local example data")
+def screen_frame(source, chapter, headline, supporting, keys, icon, progress=0):
+    frame = Image.new('RGB', (WIDTH, HEIGHT), BG)
+    draw = ImageDraw.Draw(frame)
+    frame.paste(icon, (57, 22), icon)
+    draw.text((136, 27), 'AGENT GOECHALA', font=font(28, bold=True), fill=WHITE)
+    draw.text((138, 65), 'A clear view of every agent.', font=font(16), fill=MUTED)
+    draw.text((1450, 38), chapter, font=font(19, mono=True), fill=GOLD)
+    draw.line((64, 106, 1856, 106), fill='#304b63', width=1)
+    draw.line((64, 106, 64 + int(1792 * progress), 106), fill=GOLD, width=3)
+    image = fitted(source, 1792, 754)
+    x, y = (WIDTH-image.width)//2, 127 + (754-image.height)//2
+    draw.rounded_rectangle((x-2, y-2, x+image.width+2, y+image.height+2), radius=12, fill=PANEL, outline='#304b63', width=2)
+    frame.paste(image, (x, y))
+    draw.text((66, 922), headline, font=font(35, bold=True), fill=WHITE)
+    draw.text((68, 977), supporting, font=font(21), fill=MUTED)
+    draw.text((68, 1030), 'SYNTHETIC DATA / ACTUAL TERMINAL UI', font=font(14, mono=True), fill=MUTED)
+    key_width = draw.textlength(keys, font=font(18, mono=True))
+    draw.text((1852-key_width, 1030), keys, font=font(18, mono=True), fill=CYAN)
+    return frame
 
-
-def outro_frames(base, seconds=4):
-    headline = "The pull request was not inspected."
-    supporting = "Fix the rate limit, rerun. Try: uvx --from agent-observatory-cli agent-observatory"
-    frames = []
-    for i in range(seconds * FPS):
-        t = i / max(1, seconds * FPS - 1)
-        zoom = 1.03 + 0.025 * smoothstep(t)
-        frame = camera_frame(base, (1270, 365), zoom, headline,
-                             supporting, (1208, 384), final=True)
-        frames.append(frame)
-    return frames
-
+def outro(icon):
+    frame = Image.new('RGB', (WIDTH, HEIGHT), BG)
+    large = Image.open(ROOT/'media/brand/icon-512.png').convert('RGBA').resize((320,320),Image.Resampling.LANCZOS)
+    frame.paste(large, (800,100), large)
+    draw=ImageDraw.Draw(frame)
+    def centered(text,y,typeface,fill):
+        width=draw.textlength(text,font=typeface)
+        draw.text(((WIDTH-width)/2,y),text,font=typeface,fill=fill)
+    centered('Agent Goechala', 450, font(70,bold=True), WHITE)
+    centered('A clear view of every agent.', 553, font(34), CYAN)
+    centered('agent-goechala', 694, font(30,mono=True), GOLD)
+    centered('Local agent observability. Right in your terminal.', 824, font(25), MUTED)
+    return frame
 
 def encode(captures, output, poster):
-    output.parent.mkdir(parents=True, exist_ok=True)
-    images = {name: capture(captures / f"{name}.svg")
-              for name in ("agents", "activity", "mcp", "traces")}
-    opening_base = base_screen(images["agents"])
-    poster_image = intro_frame(opening_base)
-    poster.parent.mkdir(parents=True, exist_ok=True)
-    poster_image.save(poster, optimize=True)
-
-    writer = write_frames(
-        str(output), (WIDTH, HEIGHT), fps=FPS, codec="libx264", quality=7,
-        pix_fmt_in="rgb24", macro_block_size=8,
-        output_params=["-movflags", "+faststart"],
-    )
+    output.parent.mkdir(parents=True,exist_ok=True)
+    icon=Image.open(ROOT/'media/brand/icon-128.png').convert('RGBA').resize((68,68),Image.Resampling.LANCZOS)
+    images={scene[0]:raster(captures/f'{scene[0]}.svg') for scene in SCENES}
+    screenshots=ROOT/'media/screenshots'
+    screenshots.mkdir(parents=True,exist_ok=True)
+    for name,source in images.items():
+        source.save(screenshots/f'{name}.png',optimize=True)
+    raster(captures/'compact.svg').save(screenshots/'compact.png',optimize=True)
+    first=SCENES[0]
+    poster.parent.mkdir(parents=True,exist_ok=True)
+    screen_frame(images[first[0]],*first[2:],icon).save(poster,optimize=True)
+    writer=write_frames(str(output),(WIDTH,HEIGHT),fps=FPS,codec='libx264',quality=7,
+        pix_fmt_in='rgb24',pix_fmt_out='yuv420p',macro_block_size=8,
+        output_params=['-movflags','+faststart','-metadata','title=Agent Goechala — a clear view of every agent.'])
     writer.send(None)
+    total=sum(scene[1] for scene in SCENES)+3
+    elapsed=0
+    previous=None
     try:
-        # Start directly on the product. The intro is only a brief lower third.
-        for i in range(2 * FPS):
-            t = i / max(1, 2 * FPS - 1)
-            frame = caption_overlay(opening_base,
-                "See what your coding agent did.",
-                "Session → MCP call → trace · local example data")
-            if i < 6:
-                frame = Image.blend(opening_base, frame, i / 6)
-            writer.send(frame.tobytes())
-
-        prev_pointer = None
-        last_page = "agents"
-        for name, seconds, headline, supporting, target, zoom, moves, clicks, rect in SCENES:
-            frames, prev_pointer = scene_frames(name, seconds, headline,
-                supporting, target, zoom, moves, clicks, rect, images, prev_pointer)
-            for frame in frames:
+        for name,seconds,chapter,headline,supporting,keys in SCENES:
+            for i in range(seconds*FPS):
+                frame=screen_frame(images[name],chapter,headline,supporting,keys,icon,(elapsed+i/FPS)/total)
+                if previous is not None and i<8:
+                    frame=Image.blend(previous,frame,(i+1)/8)
                 writer.send(frame.tobytes())
-            last_page = name
-        for frame in outro_frames(base_screen(images[last_page])):
+            previous=frame
+            elapsed+=seconds
+        ending=outro(icon)
+        for i in range(3*FPS):
+            frame=Image.blend(previous,ending,(i+1)/12) if i<12 else ending
             writer.send(frame.tobytes())
     finally:
         writer.close()
-    duration = 2 + sum(scene[1] for scene in SCENES) + 4
-    print(f"Wrote {output} ({output.stat().st_size / 1024 / 1024:.1f} MiB, {duration}s)")
-    print(f"Wrote {poster}")
+    print(f'Wrote {output}: {total}s, 1920x1080, {output.stat().st_size/1024/1024:.1f} MiB')
+    print(f'Poster: {poster}; six terminal screenshots: {screenshots}')
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--captures", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--poster", type=Path)
-    args = parser.parse_args()
-    poster = args.poster or args.output.with_name(args.output.stem + "-poster.png")
-    encode(args.captures, args.output, poster)
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--captures',type=Path,required=True)
+    parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--poster',type=Path)
+    args=parser.parse_args()
+    encode(args.captures,args.output,args.poster or args.output.with_name(args.output.stem+'-poster.png'))

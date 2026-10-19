@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+<title id="title">Agent Goechala pass mark</title>
+<desc id="desc">Two cyan mountain ridges frame a pass. A golden path leads through the saddle toward a warm sunrise.</desc>
+
+  <path d="M80 354 182 156 256 278 334 194 432 354Z" fill="#173148"/>
+  <path d="m80 354 102-198 74 122 78-84 98 160" fill="none" stroke="#73dce8" stroke-width="21" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m182 156 17 89 57 33M334 194l-16 91-62-7" fill="none" stroke="#3b7b91" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="260" cy="178" r="21" fill="#ffd08a"/>
+  <path d="m224 412 66-48-48-39 18-47" fill="none" stroke="#ffd08a" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="224" cy="412" r="8" fill="#f2f7fa"/>
+
+</svg>
