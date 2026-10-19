@@ -165,28 +165,42 @@ class GoogleAdkOtelEndToEndTests(unittest.TestCase):
         self.assertEqual(len(tool_spans), 1)
         self.assertEqual(tool_spans[0]["attributes"].get("gen_ai.tool.name"), "lookup_release")
         mcp_page = self.store.mcp_page()
-        self.assertEqual(mcp_page["summary"]["calls"], 1, {
+        # Newer ADK releases also emit MCP initialization and inventory spans.
+        # Preserve these protocol operations while counting the tool execution
+        # once across ADK's execute_tool and MCP tools/call spans.
+        expected_methods = ["tools/call"] + [
+            span["attributes"]["mcp.method.name"] for span in spans
+            if span["attributes"].get("mcp.method.name")
+            and span["attributes"]["mcp.method.name"] != "tools/call"
+        ]
+        self.assertEqual(mcp_page["summary"]["calls"], len(expected_methods), {
             "mcp": mcp_page,
             "spans": [(span["name"], span["attributes"]) for span in spans],
         })
-        self.assertEqual(mcp_page["calls"][0]["tool"], "lookup_release")
-        self.assertEqual(mcp_page["calls"][0]["method"], "tools/call")
+        self.assertCountEqual(
+            [call["method"] for call in mcp_page["calls"]], expected_methods
+        )
+        tool_calls = [call for call in mcp_page["calls"] if call["method"] == "tools/call"]
+        self.assertEqual(len(tool_calls), 1)
+        tool_call = tool_calls[0]
+        self.assertEqual(tool_call["tool"], "lookup_release")
         # ADK's current MCP spans identify the tool but omit the configured
         # server name; keep this explicit instead of inventing an identity.
-        self.assertEqual(mcp_page["calls"][0]["server"], "Not reported")
-        self.assertEqual(mcp_page["summary"]["unknown_server_calls"], 1)
+        self.assertEqual(tool_call["server"], "Not reported")
+        self.assertEqual(mcp_page["summary"]["unknown_server_calls"], len(expected_methods))
         self.assertEqual(mcp_page["summary"]["unknown_server_tools"], 1)
         self.assertEqual(mcp_page["summary"]["unknown_server_errors"], 0)
-        self.assertEqual(mcp_page["calls"][0]["trace_id"], run["trace_id"])
-        self.assertEqual(mcp_page["calls"][0]["session_id"], "adk-session-17")
-        self.assertEqual(mcp_page["calls"][0]["arguments"], {"project": "demo"})
+        self.assertEqual(tool_call["trace_id"], run["trace_id"])
+        self.assertEqual(tool_call["session_id"], "adk-session-17")
+        self.assertEqual(tool_call["arguments"], {"project": "demo"})
         self.assertEqual(
-            mcp_page["calls"][0]["output"]["structuredContent"],
+            tool_call["output"]["structuredContent"],
             {"result": "demo: ready"},
         )
         scoped_mcp_page = self.store.mcp_page(session_id="adk-session-17")
-        self.assertEqual(scoped_mcp_page["summary"]["calls"], 1)
-        self.assertEqual(scoped_mcp_page["calls"][0]["trace_id"], run["trace_id"])
+        self.assertEqual(scoped_mcp_page["summary"]["calls"], len(expected_methods))
+        self.assertTrue(all(call["trace_id"] == run["trace_id"]
+                            for call in scoped_mcp_page["calls"]))
         model_spans = [
             span for span in spans
             if span["attributes"].get("gen_ai.operation.name") == "generate_content"
