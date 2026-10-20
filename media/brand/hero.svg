@@ -1,28 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
 <title id="title">Agent Goechala — a clear view of every agent</title>
-<desc id="desc">Two cyan mountain ridges frame a pass. A golden path leads through the saddle toward a warm sunrise.</desc>
+<desc id="desc">Amber and lavender mountain ridges frame an open pass. A bright winding trail leads through the saddle toward the rising sun.</desc>
 
 <defs>
-  <linearGradient id="sky" x2="1" y2="1"><stop stop-color="#102b40"/><stop offset="1" stop-color="#08121f"/></linearGradient>
-  <radialGradient id="dawn"><stop stop-color="#ffd08a" stop-opacity=".12"/><stop offset="1" stop-color="#ffd08a" stop-opacity="0"/></radialGradient>
+  <linearGradient id="sky" x2="1" y2="1"><stop stop-color="#30223d"/><stop offset="1" stop-color="#121018"/></linearGradient>
+  <radialGradient id="dawn"><stop stop-color="#ffbd69" stop-opacity=".12"/><stop offset="1" stop-color="#ffbd69" stop-opacity="0"/></radialGradient>
 </defs>
 <rect width="1280" height="420" rx="28" fill="url(#sky)"/>
 <circle cx="1060" cy="170" r="230" fill="url(#dawn)"/>
-<path d="m760 420 210-270 94 122 101-150 115 154M810 420l160-212 94 122 101-150 115 154M890 420l80-95 94 63 101-110 115 112" fill="none" stroke="#28465b" stroke-width="1" opacity=".6"/>
-<path d="M64 55h30" stroke="#ffd08a" stroke-width="3"/>
-<text x="106" y="61" fill="#9aafc3" font-family="DejaVu Sans Mono,monospace" font-size="13" letter-spacing="3">LOCAL. TERMINAL. OPEN SOURCE.</text>
-<text x="62" y="140" fill="#73dce8" font-family="DejaVu Sans Mono,monospace" font-size="25" letter-spacing="7">AGENT</text>
-<text x="58" y="227" fill="#f2f7fa" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="84" letter-spacing="1">GOECHALA</text>
-<text x="64" y="282" fill="#f2f7fa" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
-<text x="65" y="354" fill="#9aafc3" font-family="DejaVu Sans Mono,monospace" font-size="15">CODEX  /  CLAUDE CODE  /  OPENCODE</text>
-<g transform="translate(913 50) scale(.65)">
-  <path d="M80 354 182 156 256 278 334 194 432 354Z" fill="#173148"/>
-  <path d="m80 354 102-198 74 122 78-84 98 160" fill="none" stroke="#73dce8" stroke-width="21" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="m182 156 17 89 57 33M334 194l-16 91-62-7" fill="none" stroke="#3b7b91" stroke-width="10" stroke-linejoin="round"/>
-  <circle cx="260" cy="178" r="21" fill="#ffd08a"/>
-  <path d="m224 412 66-48-48-39 18-47" fill="none" stroke="#ffd08a" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="224" cy="412" r="8" fill="#f2f7fa"/>
+<path d="m760 420 210-270 94 122 101-150 115 154M810 420l160-212 94 122 101-150 115 154M890 420l80-95 94 63 101-110 115 112" fill="none" stroke="#67516d" stroke-width="1" opacity=".6"/>
+<path d="M64 55h30" stroke="#ffbd69" stroke-width="3"/>
+<text x="106" y="61" fill="#b9afc5" font-family="DejaVu Sans Mono,monospace" font-size="13" letter-spacing="3">LOCAL. TERMINAL. OPEN SOURCE.</text>
+<text x="62" y="140" fill="#c5adff" font-family="DejaVu Sans Mono,monospace" font-size="25" letter-spacing="7">AGENT</text>
+<text x="58" y="227" fill="#f6f0e8" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="84" letter-spacing="1">GOECHALA</text>
+<text x="64" y="282" fill="#f6f0e8" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
+<text x="65" y="354" fill="#b9afc5" font-family="DejaVu Sans Mono,monospace" font-size="15">CODEX  /  CLAUDE CODE  /  OPENCODE</text>
+<g transform="translate(913 50) scale(.65)"><defs>
+  <linearGradient id="warm-ridge" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#ffe6bd"/><stop offset=".5" stop-color="#ffbd69"/><stop offset="1" stop-color="#d87946"/></linearGradient>
+  <linearGradient id="cool-ridge" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#eee4ff"/><stop offset=".5" stop-color="#c5adff"/><stop offset="1" stop-color="#8262bc"/></linearGradient>
+</defs>
+
+  <circle cx="265" cy="176" r="26" fill="#ffbd69"/>
+  <path d="M64 356 177 122 258 271 231 319 280 356Z" fill="url(#warm-ridge)"/>
+  <path d="m177 122 24 143 30 54 27-48Z" fill="#a34e36"/>
+  <path d="M258 271 345 161 449 356H280l-49-37Z" fill="url(#cool-ridge)"/>
+  <path d="m345 161-19 128-46 67h169Z" fill="#7960a4"/>
+  <path d="m177 122-37 77 37-22 28 20Z" fill="#fff0d6"/>
+  <path d="m345 161-36 46 36-13 25 10Z" fill="#f0e8ff"/>
+  <path d="m258 271-24 49 47 37-56 57" fill="none" stroke="#121018" stroke-width="34" stroke-linejoin="round"/>
+  <path d="m258 271-24 49 47 37-56 57" fill="none" stroke="#f6f0e8" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<rect x=".5" y=".5" width="1279" height="419" rx="28" fill="none" stroke="#304b63"/>
+<rect x=".5" y=".5" width="1279" height="419" rx="28" fill="none" stroke="#51475f"/>
 
 </svg>

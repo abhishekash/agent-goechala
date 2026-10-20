@@ -44,4 +44,4 @@ screens are exported to `media/screenshots/`. Fonts use DejaVu Sans and DejaVu
 Sans Mono; install those fonts before reproducing the raster/video assets.
 
 The source SVG identity lives in `media/brand/`. Its two ridges, open pass,
-golden path, and Alpine Night palette are described in [branding.md](branding.md).
+bright trail, and Alpine Ember palette are described in [branding.md](branding.md).

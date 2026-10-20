@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 WIDTH, HEIGHT, FPS = 1920, 1080, 24
-BG, PANEL, WHITE = '#08121f', '#0d1b2a', '#f2f7fa'
-CYAN, GOLD, MUTED = '#73dce8', '#ffd08a', '#9aafc3'
+BG, PANEL, WHITE = '#121018', '#191621', '#f6f0e8'
+CYAN, GOLD, MUTED = '#c5adff', '#ffbd69', '#b9afc5'
 FONT_DIR = Path('/usr/share/fonts/truetype/dejavu')
 SCENES = [
     ('agents', 5, '01 / OVERVIEW', 'Every session, in one place.',
@@ -48,11 +48,11 @@ def screen_frame(source, chapter, headline, supporting, keys, icon, progress=0):
     draw.text((136, 27), 'AGENT GOECHALA', font=font(28, bold=True), fill=WHITE)
     draw.text((138, 65), 'A clear view of every agent.', font=font(16), fill=MUTED)
     draw.text((1450, 38), chapter, font=font(19, mono=True), fill=GOLD)
-    draw.line((64, 106, 1856, 106), fill='#304b63', width=1)
+    draw.line((64, 106, 1856, 106), fill='#51475f', width=1)
     draw.line((64, 106, 64 + int(1792 * progress), 106), fill=GOLD, width=3)
     image = fitted(source, 1792, 754)
     x, y = (WIDTH-image.width)//2, 127 + (754-image.height)//2
-    draw.rounded_rectangle((x-2, y-2, x+image.width+2, y+image.height+2), radius=12, fill=PANEL, outline='#304b63', width=2)
+    draw.rounded_rectangle((x-2, y-2, x+image.width+2, y+image.height+2), radius=12, fill=PANEL, outline='#51475f', width=2)
     frame.paste(image, (x, y))
     draw.text((66, 922), headline, font=font(35, bold=True), fill=WHITE)
     draw.text((68, 977), supporting, font=font(21), fill=MUTED)
