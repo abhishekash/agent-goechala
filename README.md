@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/brand/hero.svg" alt="Agent Goechala — A clear view of every agent. A golden trail leads between two cyan mountain ridges." width="100%">
+  <img src="media/brand/hero.svg" alt="Agent Goechala — A clear view of every agent. A bright trail winds through a pass between amber and lavender mountain ridges." width="100%">
 </p>
 
 <h1 align="center">Agent Goechala</h1>
@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/abhishekash/agent-goechala/actions/workflows/ci.yml"><img src="https://github.com/abhishekash/agent-goechala/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/interface-terminal-73dce8?labelColor=0d1b2a" alt="Terminal interface">
-  <img src="https://img.shields.io/badge/data-local-ffd08a?labelColor=0d1b2a" alt="Data stays local">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-9aafc3?labelColor=0d1b2a" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/interface-terminal-ffbd69?labelColor=191621" alt="Terminal interface">
+  <img src="https://img.shields.io/badge/data-local-c5adff?labelColor=191621" alt="Data stays local">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-b9afc5?labelColor=191621" alt="MIT license"></a>
 </p>
 
 <p align="center">
@@ -113,7 +113,7 @@ them.
 - [Pydantic AI, Google ADK, Gemini CLI, and other OTLP agents](docs/frameworks.md)
 - [JavaScript client](docs/javascript.md)
 - [Receiver and OTLP configuration](docs/receiver.md)
-- [Brand assets and Alpine Night theme](docs/branding.md)
+- [Brand assets and Alpine Ember theme](docs/branding.md)
 
 For querying recorded MCP executions conversationally, see
 [SpanHound](https://github.com/abhishekash/spanhound), the companion MCP tool.
@@ -147,4 +147,4 @@ publication.
 ---
 
 **Agent Goechala** is open source under the [MIT license](LICENSE).
-The pass mark and the terminal's Alpine Night palette are included in the same repository.
+The pass mark and the terminal's Alpine Ember palette are included in the same repository.

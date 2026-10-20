@@ -26,7 +26,7 @@ from textual.strip import Strip
 from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
-from .branding import NAME, masthead
+from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead
 
 
 def cell(value, style=''):
@@ -130,7 +130,7 @@ def usage_series_text(points, service=None, session_id=None):
 def status(value):
     label={'OK':'OK','UNSET':'Observed','RUNNING':'In progress','ERROR':'Error','FAILED':'Failed','INCOMPLETE':'Incomplete',
            'success':'OK','started':'Started','completed':'Completed','observed':'Observed','reported':'Reported','error':'Error'}.get(str(value),str(value).title())
-    color='#ff9d91' if str(value).lower() in {'error','failed','denied','blocked','incomplete'} else '#73dce8' if str(value).lower() in {'success','ok','completed'} else '#ffd08a' if str(value).lower() in {'running','started'} else '#9aafc3'
+    color='#ff8799' if str(value).lower() in {'error','failed','denied','blocked','incomplete'} else '#86e3b5' if str(value).lower() in {'success','ok','completed'} else '#ffbd69' if str(value).lower() in {'running','started'} else '#b9afc5'
     return cell(label,color)
 
 
@@ -252,9 +252,9 @@ def format_json(value):
 def write_json(log,value):
     """Render indented JSON and move multiline string values into readable blocks."""
     formatted,text_values=format_json(value)
-    log.write(Syntax(formatted,'json',word_wrap=True,background_color='#0d1b2a'))
+    log.write(Syntax(formatted,'json',word_wrap=True,background_color='#191621'))
     for path,content in text_values:
-        log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #a8ddeb'))
+        log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #c5adff'))
         log.write(Text(content))
 
 
@@ -611,68 +611,71 @@ class ObservatoryApp(App):
     TITLE=NAME
     AUTO_FOCUS='#agent-table'
     CSS='''
-    Screen { background: #08121f; color: #e1edf5; }
-    Screen > .screen--selection { background: #2a596d; color: #ffffff; }
-    * { scrollbar-color: #385769; scrollbar-color-hover: #82a5b5; scrollbar-color-active: #73dce8; scrollbar-background: #0d1b2a; scrollbar-background-hover: #0d1b2a; scrollbar-background-active: #0d1b2a; }
-    #masthead { height: 3; padding: 0 2; align-vertical: middle; background: #0d1b2a; border-bottom: solid #304b63; }
-    #brand { width: 1fr; color: #f2f7fa; text-style: bold; text-wrap: nowrap; }
-    #connection { width: auto; color: #73dce8; text-align: right; text-wrap: nowrap; }
-    #summary { height: 3; margin: 0 2 1 2; }
-    .stat { width: 1fr; border-left: solid #2b455b; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
-    #stat-sessions { border-left: solid #73dce8; }
+    Screen { background: #121018; color: #f6f0e8; }
+    Screen > .screen--selection { background: #5c4578; color: #ffffff; }
+    * { scrollbar-color: #675975; scrollbar-color-hover: #c5adff; scrollbar-color-active: #ffbd69; scrollbar-background: #191621; scrollbar-background-hover: #191621; scrollbar-background-active: #191621; }
+    #masthead { height: 4; padding: 0 2; align-vertical: middle; background: #242030; border-bottom: solid #51475f; }
+    #brand { width: 1fr; height: 2; color: #f6f0e8; text-wrap: nowrap; }
+    #connection { width: auto; color: #86e3b5; text-align: right; text-wrap: nowrap; }
+    #summary { height: 3; margin: 1 2 0 2; }
+    .stat { width: 1fr; border-left: solid #463d52; background: #191621; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
+    #stat-sessions { border-left: solid #ffbd69; }
+    #stat-processes { border-left: solid #86e3b5; }
+    #stat-mcp-count { border-left: solid #c5adff; }
+    #stat-usage { border-left: solid #86d9ed; }
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
-    #scope-label { width: 7; height: 1; margin-top: 1; color: #9aafc3; }
+    #scope-label { width: 7; height: 1; margin-top: 1; color: #b9afc5; }
     #scope { width: 37; margin-right: 1; }
-    SelectCurrent { background: #122538; border: tall #304b63; }
-    Select:focus > SelectCurrent { border: tall #73dce8; background-tint: transparent; }
-    SelectOverlay { background: #122538; border: tall #73dce8; }
+    SelectCurrent { background: #242030; border: tall #51475f; }
+    Select:focus > SelectCurrent { border: tall #ffbd69; background-tint: transparent; }
+    SelectOverlay { background: #242030; border: tall #ffbd69; }
     #controls-spacer { width: 1fr; }
-    #reviews { width: 14; border: none; background: #08121f; margin-top: 1; color: #9aafc3; }
-    Checkbox > .toggle--button { color: #71889b; background: #122538; }
-    Checkbox.-on > .toggle--button { color: #73dce8; }
-    Button { height: 3; min-width: 9; background: #122538; color: #c4d7e5; border: tall #304b63; text-style: none; }
-    Button:hover { background: #1b3c50; border: tall #73dce8; }
-    Button:focus { border: tall #73dce8; text-style: bold; }
-    Button:disabled { color: #71889b; border: tall #203548; background: #0d1b2a; }
+    #reviews { width: 14; border: none; background: #121018; margin-top: 1; color: #b9afc5; }
+    Checkbox > .toggle--button { color: #8f849d; background: #242030; }
+    Checkbox.-on > .toggle--button { color: #ffbd69; }
+    Button { height: 3; min-width: 9; padding: 1 1 0 1; background: #242030; color: #e1d9eb; border: none; border-bottom: solid #51475f; text-style: none; }
+    Button:hover { background: #3a2c49; border-bottom: solid #c5adff; }
+    Button:focus { border-bottom: heavy #ffbd69; background: #493622; color: #ffbd69; text-style: bold; }
+    Button:disabled { color: #8f849d; border-bottom: solid #393041; background: #191621; }
     #pause { width: 12; }
     #pages { height: 1fr; margin: 0 2; }
-    Tabs { height: 3; padding-top: 1; }
-    Tab { color: #9aafc3; padding: 0 2; }
-    Tab.-active { color: #73dce8; text-style: bold; }
-    Tabs:focus .-active { background: #173c4a; color: #b2f2ed; }
-    Underline > .underline--bar { color: #73dce8; background: #304b63; }
+    Tabs { height: 2; padding-top: 0; margin-top: 1; }
+    Tab { color: #b9afc5; padding: 0 2; background: #191621; }
+    Tab.-active { color: #21182a; background: #ffbd69; text-style: bold; }
+    Tabs:focus .-active { background: #ffdb9f; color: #21182a; text-style: bold underline; }
+    Underline > .underline--bar { color: #ffbd69; background: #51475f; }
     TabPane { padding: 0; }
     ContentSwitcher { height: 1fr; }
-    .hint { height: 2; color: #9aafc3; }
-    .box { border: round #2b455b; border-title-color: #c4d7e5; border-title-style: bold; background: #0d1b2a; padding: 0 1; }
-    .box:focus-within { border: round #5c9aac; border-title-color: #73dce8; }
+    .hint { height: 2; color: #b9afc5; }
+    .box { border: round #463d52; border-title-color: #e1d9eb; border-title-style: bold; background: #191621; padding: 0 1; }
+    .box:focus-within { border: round #ffbd69; border-title-color: #ffbd69; }
     .results { height: 1fr; }
     .searchbar { height: 3; align-vertical: middle; }
-    .view-search { width: 1fr; margin-right: 1; padding: 0 1; background: #122538; border: tall #304b63; }
-    .view-search:focus { border: tall #73dce8; background-tint: transparent; }
-    Input > .input--placeholder { color: #9aafc3; }
-    Input > .input--cursor { background: #73dce8; color: #08121f; }
-    Input > .input--selection { background: #2a596d; color: #ffffff; }
+    .view-search { width: 1fr; margin-right: 1; padding: 0 1; background: #242030; border: tall #51475f; }
+    .view-search:focus { border: tall #ffbd69; background-tint: transparent; }
+    Input > .input--placeholder { color: #b9afc5; }
+    Input > .input--cursor { background: #ffbd69; color: #121018; }
+    Input > .input--selection { background: #5c4578; color: #ffffff; }
     .clear-search { width: 9; }
     .error-filter { width: 12; margin-right: 1; }
-    .error-filter.-on { color: #ff9d91; border: tall #ff9d91; background: #3a2630; }
+    .error-filter.-on { color: #ff8799; border: tall #ff8799; background: #422330; }
     .prompt-filter { width: 12; margin-right: 1; }
-    .prompt-filter.-on { color: #73dce8; border: tall #73dce8; background: #173c4a; text-style: bold; }
-    .search-status { height: 1; color: #9aafc3; padding: 0 1; }
+    .prompt-filter.-on { color: #ffbd69; border: tall #ffbd69; background: #493622; text-style: bold; }
+    .search-status { height: 1; color: #b9afc5; padding: 0 1; }
     .history-controls { height: 1; margin-top: 1; }
-    .history-controls Static { width: 1fr; color: #9aafc3; }
-    .history-controls Button { min-width: 8; width: auto; height: 1; margin-left: 1; border: none; }
-    .history-controls Button:focus { background: #214c61; color: #ffffff; }
+    .history-controls Static { width: 1fr; color: #b9afc5; }
+    .history-controls Button { min-width: 8; width: auto; height: 1; padding: 0 1; margin-left: 1; border: none; }
+    .history-controls Button:focus { background: #443555; color: #ffffff; }
     #history-back { width: 10; margin-right: 1; }
-    DataTable { background: #0d1b2a; height: 1fr; scrollbar-size: 1 1; }
+    DataTable { background: #191621; height: 1fr; scrollbar-size: 1 1; }
     DataTable:focus { background-tint: transparent; }
-    DataTable > .datatable--header { background: #173148; color: #b5cee0; text-style: bold; }
-    DataTable > .datatable--cursor { background: #214c61; color: #f5ffff; text-style: bold; }
-    DataTable:blur > .datatable--cursor { background: #1a3449; color: #e1edf5; text-style: none; }
-    DataTable > .datatable--hover { background: #17364a; }
-    DataTable > .datatable--odd-row { background: #102233; }
-    DataTable > .datatable--even-row { background: #0d1b2a; }
-    RichLog { background: #0d1b2a; color: #e1edf5; scrollbar-size: 1 1; }
+    DataTable > .datatable--header { background: #30283e; color: #c5adff; text-style: bold; }
+    DataTable > .datatable--cursor { background: #443555; color: #fff7eb; text-style: bold; }
+    DataTable:blur > .datatable--cursor { background: #30283e; color: #f6f0e8; text-style: none; }
+    DataTable > .datatable--hover { background: #352b43; }
+    DataTable > .datatable--odd-row { background: #211b2b; }
+    DataTable > .datatable--even-row { background: #191621; }
+    RichLog { background: #191621; color: #f6f0e8; scrollbar-size: 1 1; }
     RichLog:focus { background-tint: transparent; }
     #mcp-servers { height: 7; margin-bottom: 1; }
     .expanded #mcp-servers { display: none; }
@@ -686,20 +689,20 @@ class ObservatoryApp(App):
     .list { width: 3fr; margin-right: 1; }
     .detail { width: 2fr; }
     .detail-log { height: 1fr; }
-    #usage-series { height: 12; min-height: 6; padding: 0 1; color: #b5cee0; }
+    #usage-series { height: 12; min-height: 6; padding: 0 1; color: #c5adff; }
     .detail-button { height: 3; width: 100%; }
     .inspector-actions { height: 3; }
     .inspector-actions Button { width: 1fr; }
     .expand-button { min-width: 12; }
     #trace-detail { width: 2fr; }
-    #span-tree { height: 1fr; min-height: 4; background: #0d1b2a; scrollbar-size: 1 1; }
-    #span-info { height: 10; border-top: solid #2b455b; }
-    #health { height: 1; padding: 0 2; color: #9aafc3; }
-    Footer { background: #122538; color: #9aafc3; }
-    FooterKey { background: #1b3b50; color: #73dce8; }
-    FooterKey > .footer-key--key { background: #1b3b50; color: #73dce8; }
-    FooterKey > .footer-key--description { background: #122538; color: #c4d7e5; }
-    FooterLabel { background: #122538; color: #c4d7e5; }
+    #span-tree { height: 1fr; min-height: 4; background: #191621; scrollbar-size: 1 1; }
+    #span-info { height: 10; border-top: solid #463d52; }
+    #health { height: 1; padding: 0 2; color: #b9afc5; }
+    Footer { background: #242030; color: #b9afc5; }
+    FooterKey { background: #3b2d4c; color: #ffbd69; }
+    FooterKey > .footer-key--key { background: #ffbd69; color: #21182a; text-style: bold; }
+    FooterKey > .footer-key--description { background: #242030; color: #e1d9eb; }
+    FooterLabel { background: #242030; color: #e1d9eb; }
     .narrow #masthead { padding: 0 1; }
     .narrow #summary { margin: 0 1; }
     .narrow .stat { padding: 0 1; }
@@ -712,8 +715,9 @@ class ObservatoryApp(App):
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail, .narrow #trace-detail { width: 100%; height: 1fr; }
     .compact #masthead { height: 2; border-bottom: none; }
+    .compact #brand { height: 1; }
     .compact #summary { margin-bottom: 0; }
-    .compact Tabs { height: 2; padding-top: 0; }
+    .compact Tabs { height: 2; padding-top: 0; margin-top: 0; }
     .compact #agent-bottom, .compact .detail, .compact #trace-detail, .compact #host-detail { display: none; }
     .compact .list { width: 100%; height: 1fr; margin: 0; }
     .expanded .results { display: none; }
@@ -923,11 +927,14 @@ class ObservatoryApp(App):
         size=size or self.size
         self.screen.set_class(size.width<140,'narrow')
         self.screen.set_class(size.height<36,'compact')
+        for brand in self.query('#brand'):
+            brand.update(masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36))
 
     def stat(self,name,value,label,detail):
-        text=Text(label.upper()+'\n',style='#9aafc3',no_wrap=True,overflow='ellipsis')
-        text.append(str(value),style='bold #f2f7fa')
-        text.append('\n'+detail,style='#9aafc3')
+        accent={'sessions':AMBER,'processes':MINT,'mcp-count':LAVENDER,'usage':ICE}[name]
+        text=Text(label.upper()+'\n',style='#e1d9eb',no_wrap=True,overflow='ellipsis')
+        text.append(str(value),style='bold '+accent)
+        text.append('\n'+detail,style='#b9afc5')
         self.query_one('#stat-'+name,Static).update(text)
 
     def fill(self,name,rows,preserve=None):
@@ -979,12 +986,12 @@ class ObservatoryApp(App):
         connection='Ⅱ Paused' if self.feed.paused else '○ Reconnecting' if data.error else '● Connected'
         endpoint=self.feed.api.endpoint.removeprefix('http://').removeprefix('https://')
         self.query_one('#connection',Static).update(Text(connection+'  '+endpoint,
-            style='#f2c779' if self.feed.paused else '#ff9d91' if data.error else '#73dce8'))
+            style='#ffbd69' if self.feed.paused else '#ff8799' if data.error else '#86e3b5'))
         health_text=(data.error if data.error else
             f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}")
         coverage=coverage_warning(data.local_status)
         if coverage:health_text+='  ·  '+coverage
-        health=Text(health_text,style='#f2c779' if coverage and not data.error else '#ff9d91' if data.error else '#9aafc3')
+        health=Text(health_text,style='#ffbd69' if coverage and not data.error else '#ff8799' if data.error else '#b9afc5')
         self.query_one('#health',Static).update(health)
         if self.screen.selections:
             self.query_one('#health',Static).update('Text selected · Ctrl+C to copy · click to clear selection and resume display updates')
@@ -1037,17 +1044,17 @@ class ObservatoryApp(App):
                         (not agent_query or agent_query in ' '.join(str(item.get(key) or '') for key in ('runtime','service','project','working_directory','branch','task','model','session_id','id','state','waiting_for')).casefold())]
         visible_agents.sort(key=lambda item:(not input_required(item),not item['recent'],-item['stamp'],item['id']))
         self.fill('agent-table',[(item['id'],[
-            cell(item['runtime']),cell(item.get('session_id') or item['id'],'#b5cee0'),
+            cell(item['runtime']),cell(item.get('session_id') or item['id'],'#c5adff'),
             cell(item.get('project') or '—'),
-            cell(input_status(item),'bold #ff9d91' if input_required(item) else '#fbbf24' if item['state']=='Waiting' else '#73dce8' if item['recent'] else '#9aafc3'),
-            cell(age(item['stamp']),'#9aafc3'),cell(wait_label(item)),
+            cell(input_status(item),'bold #ff8799' if input_required(item) else '#ffbd69' if item['state']=='Waiting' else '#86e3b5' if item['recent'] else '#b9afc5'),
+            cell(age(item['stamp']),'#b9afc5'),cell(wait_label(item)),
             cell(item.get('task') or 'Task not reported')],item) for item in visible_agents])
         self.search_status('agents',len(visible_agents),'session')
         if self.selected_source not in {item['id'] for item in visible_agents}:self.selected_source=visible_agents[0]['id'] if visible_agents else None
         self.show_agent()
         activity_items=self.visible_results('activity',data.activity_results if data.activity_results is not None else data.activity)
         activity_items=self.hold_selected('activity',activity_items,self.selected_activity,'source_id')
-        activity=[(item.get('id') or item['source_id'],[cell(table_when(item['time_unix_nano'])),cell(item['domain'].upper(),'#a8ddeb'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
+        activity=[(item.get('id') or item['source_id'],[cell(table_when(item['time_unix_nano'])),cell(item['domain'].upper(),'#c5adff'),status(item.get('result')),cell(headline(item))],item) for item in activity_items]
         self.query_one('#results-activity').border_title='User prompts · newest first' if self.prompts_only else 'Activity stream'
         self.fill('activity-table',activity)
         self.search_status('activity',len(activity),'prompt' if self.prompts_only else 'event')
@@ -1072,7 +1079,7 @@ class ObservatoryApp(App):
                 label+=' · metric totals available'
             row={'server':server,'calls':calls.get('calls',0),'metric_calls':metric_calls,
                  'tools':calls.get('tools',0),'errors':calls.get('errors',0)}
-            inventory.append((server,[cell(server),cell(label,'#73dce8' if configs else '#9aafc3'),
+            inventory.append((server,[cell(server),cell(label,'#ffbd69' if configs else '#b9afc5'),
                 cell(number(row['calls'])),cell(number(row['metric_calls'])),
                 cell(number(row['tools'])),cell(number(row['errors']))],row))
         unknown_calls=data.mcp_summary.get('unknown_server_calls',0)
@@ -1081,13 +1088,13 @@ class ObservatoryApp(App):
                      'metric_calls':0,'tools':data.mcp_summary.get('unknown_server_tools',0),
                      'errors':data.mcp_summary.get('unknown_server_errors',0)}
             inventory.append(('Not reported',[cell('Not reported'),
-                cell('Server identity missing · attribution unavailable','#fbbf24'),
+                cell('Server identity missing · attribution unavailable','#ffbd69'),
                 cell(number(unknown['calls'])),cell('0'),cell(number(unknown['tools'])),
                 cell(number(unknown['errors']))],unknown))
         self.fill('mcp-servers',inventory)
         mcp_items=self.visible_results('mcp',data.mcp_results if data.mcp_results is not None else data.mcp)
         mcp_items=self.hold_selected('mcp',mcp_items,self.selected_mcp,'id')
-        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano']),'#9aafc3'),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server'],'#b5cee0'),cell(item['tool'] if item.get('tool') not in ('', 'Not reported') else item.get('method') or 'Not reported'),status(item['status']),cell('—' if item['duration_ms'] is None else timing(item['duration_ms']))],item) for item in mcp_items])
+        self.fill('mcp-table',[(item['id'],[cell(table_when(item['time_unix_nano']),'#b9afc5'),cell((item.get('service') or 'Unknown')+' · '+str(item.get('session_id') or '—')[-6:]),cell(item['server'],'#c5adff'),cell(item['tool'] if item.get('tool') not in ('', 'Not reported') else item.get('method') or 'Not reported'),status(item['status']),cell('—' if item['duration_ms'] is None else timing(item['duration_ms']))],item) for item in mcp_items])
         if self.selected_mcp not in self.table_data.get('mcp-table',{}):self.selected_mcp=mcp_items[0]['id'] if mcp_items else None
         self.show_mcp()
         if not data.mcp_available:
@@ -1119,7 +1126,7 @@ class ObservatoryApp(App):
         finding_items=[item for item in data.finding_results if not finding_query or finding_query in ' '.join(
             str(item.get(key) or '') for key in ('severity','kind','title','detail','task','session_id','services','run_status')).casefold()]
         self.fill('finding-table',[(item['id'],[
-            cell(str(item.get('severity') or 'Unknown').upper(),'#ff9d91' if item.get('severity')=='high' else '#fbbf24' if item.get('severity')=='medium' else '#b5cee0'),
+            cell(str(item.get('severity') or 'Unknown').upper(),'#ff8799' if item.get('severity')=='high' else '#ffbd69' if item.get('severity')=='medium' else '#c5adff'),
             cell(item.get('kind') or 'Finding'),cell(item.get('title') or 'Review finding'),
             cell(number(item.get('occurrence_count',1))),cell(age(item.get('time_unix_nano',0)) if item.get('time_unix_nano') else '—')],item)
             for item in finding_items])
@@ -1250,8 +1257,8 @@ class ObservatoryApp(App):
         self.inspector_signatures[name]=signature
         log=self.query_one('#'+name,RichLog)
         scroll=log.scroll_offset
-        log.clear();log.write(Text(title,style='bold #f2f7fa'))
-        table=Table.grid(padding=(0,2));table.add_column(style='#9aafc3',no_wrap=True);table.add_column()
+        log.clear();log.write(Text(title,style='bold #f6f0e8'))
+        table=Table.grid(padding=(0,2));table.add_column(style='#b9afc5',no_wrap=True);table.add_column()
         for label,value in fields:table.add_row(Text(label),Text(str('Not reported' if value is None or value=='' else value)))
         log.write(table)
         for label,value in sections:self.write_evidence(log,label,value)
@@ -1264,7 +1271,7 @@ class ObservatoryApp(App):
         if isinstance(value,str) and label.casefold() in {'recorded content','text','output','response'}:
             segments=embedded_json(value)
             if any(kind=='json' for kind,_ in segments):
-                log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
+                log.write(Text('\n'+label.title(),style='bold #c5adff'))
                 for kind,content in segments:
                     if kind=='text':
                         if content.strip():log.write(Text(content.strip('\n')))
@@ -1281,12 +1288,12 @@ class ObservatoryApp(App):
             if key.lower()=='wrapper':
                 self.write_evidence(log,label,child,depth+1);return
         if depth==0 and isinstance(value,(dict,list)) and value:
-            log.write(Text('\n'+label.upper(),style='bold #73dce8'))
+            log.write(Text('\n'+label.upper(),style='bold #ffbd69'))
             if label.lower()=='arguments':
                 write_json(log,value)
                 return
         if isinstance(value,(dict,list)) and not value:
-            log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
+            log.write(Text('\n'+label.title(),style='bold #c5adff'))
             log.write(Text('No entries' if isinstance(value,list) else 'Empty object'))
             return
         if isinstance(value,dict) and value.get('type') in {'text','input_text','output_text'} and 'text' in value:
@@ -1305,22 +1312,22 @@ class ObservatoryApp(App):
             for child in value:self.write_evidence(log,label,child,depth+1)
             return
         if isinstance(value,(dict,list)):
-            log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
+            log.write(Text('\n'+label.title(),style='bold #c5adff'))
             write_json(log,value)
             return
-        log.write(Text('\n'+label.title(),style='bold #a8ddeb'))
+        log.write(Text('\n'+label.title(),style='bold #c5adff'))
         if label.lower()=='command':
             command=shell_command(value)
             script=heredoc_script(command)
             if script:
                 language,title,body=script
-                log.write(Text(title,style='bold #a8ddeb'))
-                log.write(Syntax(body or '# Empty script',language,word_wrap=True,background_color='#0d1b2a'))
+                log.write(Text(title,style='bold #c5adff'))
+                log.write(Syntax(body or '# Empty script',language,word_wrap=True,background_color='#191621'))
                 return
-            log.write(Syntax(command,'bash',word_wrap=True,background_color='#0d1b2a'))
+            log.write(Syntax(command,'bash',word_wrap=True,background_color='#191621'))
         elif label.lower() in {'diff','patch','unified diff','code'}:
             lexer='diff' if 'diff' in label.lower() or label.lower()=='patch' else 'python' if label.lower()=='code' else 'bash'
-            log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#0d1b2a'))
+            log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#191621'))
         else:log.write(Text(str(value)))
 
     def show_agent(self):
@@ -1469,7 +1476,7 @@ class ObservatoryApp(App):
                 if parent and parent not in nodes and any(span['span_id']==parent for span in spans):remaining.append(item);continue
                 attrs=item['attributes'];kind='MCP' if attrs.get('mcp.server.name') or attrs.get('mcp.tool.name') else 'MODEL' if attrs.get('gen_ai.operation.name')=='chat' or 'gen_ai.usage.input_tokens' in attrs else 'TOOL' if attrs.get('tool.name') else 'RUN'
                 duration=None if attrs.get('observatory.duration_unknown') else (item['end_unix_nano']-item['start_unix_nano'])/1e6
-                label=Text(f"{kind:5} ",style='#a8ddeb');label.append(clean(item['name']));label.append(' · '+timing(duration),style='dim')
+                label=Text(f"{kind:5} ",style='#c5adff');label.append(clean(item['name']));label.append(' · '+timing(duration),style='#b9afc5')
                 if item['status']=='ERROR':label.append(' · ERROR',style='bold red')
                 nodes[item['span_id']]=(nodes.get(parent) or tree.root).add(label,data=item,expand=True)
             if not remaining:break

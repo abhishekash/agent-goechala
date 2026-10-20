@@ -10,7 +10,6 @@ os.environ.pop('NO_COLOR', None)
 os.environ['TERM'] = 'xterm-256color'
 sys.path.insert(0, str(ROOT))
 from observatory.terminal import Snapshot, Feed
-from observatory.branding import masthead
 from observatory.terminal_ui import ObservatoryApp
 
 now = time.time_ns()
@@ -111,7 +110,8 @@ async def main():
     frames=[]
     async with app.run_test(size=(150,46)) as pilot:
         await pilot.pause(.4)
-        app.query_one('#brand').update(masthead(demo=True))
+        app.demo_mode = True
+        app.update_layout()
         for page in ('agents','activity','mcp','traces','host'):
             app.action_page(page)
             await pilot.pause(.5)

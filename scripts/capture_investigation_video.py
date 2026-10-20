@@ -10,7 +10,6 @@ import asyncio
 from pathlib import Path
 
 from render_terminal_demo import FakeFeed, ObservatoryApp, event, now, snapshot, source_id
-from observatory.branding import masthead
 
 
 def prepare_failure():
@@ -86,9 +85,10 @@ async def capture(output: Path):
     output.mkdir(parents=True, exist_ok=True)
     prepare_failure()
     app = ObservatoryApp(FakeFeed())
+    app.demo_mode = True
     async with app.run_test(size=(148, 42)) as pilot:
         await pilot.pause(0.5)
-        app.query_one('#brand').update(masthead(demo=True))
+        app.update_layout()
         async def save(name):
             await pilot.pause(0.6)
             (output / f'{name}.svg').write_text(app.export_screenshot(title='Agent Goechala · synthetic demo'))
