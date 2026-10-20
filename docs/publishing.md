@@ -25,4 +25,4 @@ The workflow checks that the tag matches `pyproject.toml`, runs the test suite, 
 
 ## Later releases
 
-Update `version` in `pyproject.toml`, merge the release changes to `main`, then tag and push the matching version, for example `v0.1.2`. PyPI does not allow replacing a version after upload; publish a new version to correct a release.
+Update `version` in `pyproject.toml` and `uv.lock`, merge the release changes to `main`, then tag and push the matching version. PyPI does not allow replacing a version after upload; publish a new version to correct a release.
