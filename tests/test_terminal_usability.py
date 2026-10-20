@@ -13,7 +13,7 @@ from rich.text import Text
 from textual.events import MouseDown, MouseMove, MouseUp
 from textual.geometry import Offset
 from textual.selection import Selection
-from textual.widgets import TabbedContent
+from textual.widgets import Button, TabbedContent
 
 from observatory.core import Store, normalize_native
 from observatory.terminal import Feed
@@ -28,6 +28,77 @@ async def drag(app, pilot, log, start, end):
             delta_x=end[0]-start[0],delta_y=end[1]-start[1],button=1,
             shift=False,meta=False,ctrl=False,screen_x=x,screen_y=y))
         await pilot.pause()
+
+
+class ControlVisibilityTest(unittest.IsolatedAsyncioTestCase):
+    def assert_label_visible(self, button):
+        self.assertGreater(button.content_size.height, 0,
+                           f'{button.id}: borders and padding hid the label')
+        rendered=' '.join(button.render_line(row).text for row in range(button.size.height))
+        self.assertIn(button.label.plain, rendered, f'{button.id}: label missing from rendered button')
+
+    async def test_selected_filters_keep_labels_visible_with_mouse_and_keyboard(self):
+        app=ObservatoryApp(ManualFeed())
+        async with app.run_test(size=(160,48)) as pilot:
+            for size in ((160,48),(120,40),(80,24)):
+                await pilot.resize_terminal(*size)
+                app.action_all()
+                app.action_page('activity')
+                await pilot.pause()
+                prompts=app.query_one('#prompts-activity',Button)
+                prompts.focus()
+                await pilot.press('enter')
+                await pilot.pause()
+                self.assertTrue(app.prompts_only)
+                self.assert_label_visible(prompts)
+                await pilot.hover(prompts)
+                await pilot.pause()
+                self.assert_label_visible(prompts)
+                app.query_one('#activity-table').focus()
+                await pilot.hover('#search-activity')
+                await pilot.pause()
+                self.assert_label_visible(prompts)
+                # Errors replaces Prompts and uses the same selected-filter geometry.
+                for page in ('activity','mcp'):
+                    app.action_page(page)
+                    await pilot.pause()
+                    errors=app.query_one('#errors-'+page,Button)
+                    await pilot.click(errors)
+                    await pilot.pause(.2)
+                    self.assertTrue(errors.has_class('-on'))
+                    self.assert_label_visible(errors)
+                    errors.focus()
+                    await pilot.press('enter')
+                    await pilot.pause()
+                    self.assertFalse(errors.has_class('-on'))
+                    self.assert_label_visible(errors)
+                self.assertFalse(app.prompts_only)
+                app.action_page('activity')
+                await pilot.pause()
+                self.assert_label_visible(prompts)
+
+    async def test_visible_buttons_keep_labels_in_focus_hover_and_pressed_states(self):
+        app=ObservatoryApp(ManualFeed())
+        async with app.run_test(size=(160,48)) as pilot:
+            for page in ('agents','activity','mcp','traces','host','metrics','findings'):
+                app.action_page(page)
+                await pilot.pause()
+                for button in app.query(Button):
+                    if not button.visible or not button.region.height:
+                        continue
+                    if not app.screen.region.contains_region(button.region):
+                        continue
+                    self.assert_label_visible(button)
+                    if button.disabled:
+                        continue
+                    button.focus()
+                    await pilot.hover(button)
+                    await pilot.pause()
+                    self.assert_label_visible(button)
+                    button.add_class('-active')
+                    await pilot.pause()
+                    self.assert_label_visible(button)
+                    button.remove_class('-active')
 
 
 class PointerCopyTest(unittest.IsolatedAsyncioTestCase):

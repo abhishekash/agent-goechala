@@ -633,7 +633,7 @@ class ObservatoryApp(App):
     #reviews { width: 14; border: none; background: #121018; margin-top: 1; color: #b9afc5; }
     Checkbox > .toggle--button { color: #8f849d; background: #242030; }
     Checkbox.-on > .toggle--button { color: #ffbd69; }
-    Button { height: 3; min-width: 9; padding: 1 1 0 1; background: #242030; color: #e1d9eb; border: none; border-bottom: solid #51475f; text-style: none; }
+    Button { height: 3; min-width: 9; padding: 1 0 0 0; background: #242030; color: #e1d9eb; border: none; border-bottom: solid #51475f; text-style: none; }
     Button:hover { background: #3a2c49; border-bottom: solid #c5adff; }
     Button:focus { border-bottom: heavy #ffbd69; background: #493622; color: #ffbd69; text-style: bold; }
     Button:disabled { color: #8f849d; border-bottom: solid #393041; background: #191621; }
@@ -658,9 +658,9 @@ class ObservatoryApp(App):
     Input > .input--selection { background: #5c4578; color: #ffffff; }
     .clear-search { width: 9; }
     .error-filter { width: 12; margin-right: 1; }
-    .error-filter.-on { color: #ff8799; border: tall #ff8799; background: #422330; }
+    .error-filter.-on { color: #ff8799; border-bottom: heavy #ff8799; background: #422330; text-style: bold; }
     .prompt-filter { width: 12; margin-right: 1; }
-    .prompt-filter.-on { color: #ffbd69; border: tall #ffbd69; background: #493622; text-style: bold; }
+    .prompt-filter.-on { color: #ffbd69; border-bottom: heavy #ffbd69; background: #493622; text-style: bold; }
     .search-status { height: 1; color: #b9afc5; padding: 0 1; }
     .history-controls { height: 1; margin-top: 1; }
     .history-controls Static { width: 1fr; color: #b9afc5; }
