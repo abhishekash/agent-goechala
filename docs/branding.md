@@ -49,8 +49,9 @@ on a single line. Demo mode adds a filled amber **DEMO** badge. The lockup is
 centered horizontally, while connection status stays at the right edge; the full
 endpoint is available in its tooltip. Short terminals drop the tagline to leave
 the name alone, and the MCP server inventory is hidden to preserve room for the
-session and call tables. The keyboard map appears beside the scope control in
-the footer's key style, and drops out below 140 columns. No image protocols, emoji rendering, or Nerd Font is
+session and call tables. The footer keeps the full key map, and a few keys —
+search, trace, and the command palette — repeat beside the scope control in the
+footer's key style, dropping out below 120 columns. No image protocols, emoji rendering, or Nerd Font is
 required. Below 100 columns, summary cards form two rows; longer explanations
 live in tooltips rather than running off the edge of a card. The wordmark uses
 the theme's primary text color and the tagline its supporting color; both meet

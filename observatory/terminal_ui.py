@@ -26,7 +26,7 @@ from textual.strip import Strip
 from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
-from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead, shortcut_hints
+from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead, shortcut_hints, SCOPE_HINTS
 from .themes import PALETTES, supported_themes, themed_style, themed_text
 
 
@@ -657,7 +657,8 @@ class ObservatoryApp(App):
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
     #scope-label { width: 6; height: 1; margin-top: 1; color: $agent-muted; }
     #scope { width: 32; margin-right: 1; }
-    #shortcuts { height: 1; margin-top: 1; margin-right: 2; color: $agent-muted; text-wrap: nowrap; }
+    #shortcuts { display: none; height: 1; margin-top: 1; margin-right: 2; color: $agent-muted; text-wrap: nowrap; }
+    .with-hints #shortcuts { display: block; }
     SelectCurrent { background: $agent-panel; border: tall $agent-border; }
     SelectCurrent #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
     Select:focus > SelectCurrent { border: tall $agent-primary; background-tint: transparent; }
@@ -742,7 +743,6 @@ class ObservatoryApp(App):
     .narrow .stat { padding: 0 1; }
     .narrow #controls { margin: 0 1; }
     .narrow #scope { width: 32; }
-    .narrow #shortcuts { display: none; }
     .narrow #pages { margin: 0 1; }
     .narrow Tab { padding: 0 1; }
     .narrow #agent-bottom { height: 12; }
@@ -854,7 +854,7 @@ class ObservatoryApp(App):
             yield Button('← Back',id='history-back',disabled=True,tooltip='Return to the event you opened · Alt+Left')
             yield Static('Scope',id='scope-label')
             yield Select([('All agent sessions','all')],value='all',allow_blank=False,id='scope')
-            yield Static(shortcut_hints(),id='shortcuts')
+            yield Static(shortcut_hints(SCOPE_HINTS),id='shortcuts')
             yield Static('',id='controls-spacer')
             yield Checkbox('Reviews',id='reviews')
             yield Button('Pause',id='pause')
@@ -943,7 +943,7 @@ class ObservatoryApp(App):
         self.query_one('#reviews').tooltip='Include internal approval review sessions'
         self.query_one('#pause').tooltip='Pause display updates · collection continues'
         # The hints keep their own width so the scope and controls keep theirs.
-        self.query_one('#shortcuts').styles.width=cell_len(shortcut_hints().plain)
+        self.query_one('#shortcuts').styles.width=cell_len(shortcut_hints(SCOPE_HINTS).plain)
         for log in self.query(SelectableRichLog):
             log.tooltip='Drag to select text · Ctrl+C copies selection · c copies details'
         self.query_one('#host-detail').styles.height=8
@@ -985,11 +985,12 @@ class ObservatoryApp(App):
         size=size or self.size
         self.screen.set_class(size.width<140,'narrow')
         self.screen.set_class(size.width<100,'small')
+        self.screen.set_class(size.width>=120,'with-hints')
         self.screen.set_class(size.height<36,'compact')
         for brand in self.query('#brand'):
             brand.update(themed_text(brand,masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36 or size.width<100)))
         for hints in self.query('#shortcuts'):
-            hints.update(themed_text(hints,shortcut_hints()))
+            hints.update(themed_text(hints,shortcut_hints(SCOPE_HINTS)))
         self.last_update=-1
 
     def stat(self,name,value,label,detail):

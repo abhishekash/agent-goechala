@@ -15,12 +15,14 @@ LABEL = "#e1d9eb"
 CYAN, GOLD = ICE, AMBER
 
 SHORTCUTS = (('/', 'search'), ('e', 'expand'), ('t', 'trace'), ('c', 'copy'), ('q', 'quit'))
+# The few keys worth repeating beside the scope; the footer keeps the full map.
+SCOPE_HINTS = (('/', 'search'), ('t', 'trace'), ('ctrl+p', 'palette'))
 
 
-def shortcut_hints():
+def shortcut_hints(keys=SHORTCUTS):
     """Keyboard hints, styled like the footer keys."""
     text = Text()
-    for index, (key, label) in enumerate(SHORTCUTS):
+    for index, (key, label) in enumerate(keys):
         if index:
             text.append('  ')
         text.append(f' {key} ', style=f'bold #121018 on {AMBER}')

@@ -40,19 +40,27 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
     async def test_shortcut_hints_sit_next_to_the_scope(self):
         app = ObservatoryApp(ManualFeed())
         async with app.run_test(size=(160, 48)) as pilot:
-            for size in ((160, 48), (140, 48), (120, 40), (80, 24)):
+            for size in ((160, 48), (120, 40), (100, 40), (80, 24)):
                 await pilot.resize_terminal(*size)
                 await pilot.pause()
                 hints = app.query_one('#shortcuts')
                 scope = app.query_one('#scope')
-                if size[0] >= 140:
+                if size[0] >= 120:
                     self.assertTrue(hints.display, f'{size}: hints should be visible')
                     self.assertLessEqual(scope.region.right, hints.region.x)
                     rendered = hints.render_line(0).text
-                    for label in ('search', 'expand', 'trace', 'copy', 'quit'):
+                    for label in ('search', 'trace', 'palette'):
                         self.assertIn(label, rendered)
                 else:
                     self.assertFalse(hints.display, f'{size}: hints should be hidden')
+
+    async def test_footer_keeps_the_full_key_map(self):
+        app = ObservatoryApp(ManualFeed())
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.pause()
+            labels = {str(key.description) for key in app.query('FooterKey')}
+            for label in ('Search', 'Expand', 'Trace', 'Copy', 'Pause', 'Quit', 'palette'):
+                self.assertIn(label, labels)
 
     async def test_masthead_lockup_is_centered(self):
         app = ObservatoryApp(ManualFeed())
