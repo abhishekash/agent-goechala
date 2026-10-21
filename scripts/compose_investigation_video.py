@@ -1,7 +1,9 @@
 """Build the branded README walkthrough from actual Textual SVG captures.
 
 Requires Pillow, CairoSVG, and imageio-ffmpeg. Frames are streamed to the encoder
-so a full-HD video does not require keeping hundreds of images in memory.
+so a full-HD video does not require keeping hundreds of images in memory. The
+readme layout fills a 1600-pixel-wide frame with the terminal so the README GIF
+stays legible in GitHub's content column.
 """
 import argparse
 from io import BytesIO
@@ -41,9 +43,33 @@ def fitted(source, width, height):
     image.thumbnail((width, height), Image.Resampling.LANCZOS)
     return image
 
-def screen_frame(source, chapter, headline, supporting, keys, icon, progress=0):
-    frame = Image.new('RGB', (WIDTH, HEIGHT), BG)
+README_WIDTH = 1600
+README_CAPTION = 190
+
+
+def canvas_size(source, layout):
+    if layout == 'readme':
+        return README_WIDTH, round(README_WIDTH * source.height / source.width) + README_CAPTION
+    return WIDTH, HEIGHT
+
+
+def screen_frame(source, chapter, headline, supporting, keys, icon, progress=0,
+                 layout='wide', size=(WIDTH, HEIGHT)):
+    width, height = size
+    frame = Image.new('RGB', (width, height), BG)
     draw = ImageDraw.Draw(frame)
+    if layout == 'readme':
+        image = fitted(source, width, height - README_CAPTION)
+        frame.paste(image, (0, 0))
+        top = image.height
+        draw.text((48, top + 26), headline, font=font(40, bold=True), fill=WHITE)
+        draw.text((50, top + 88), supporting, font=font(22), fill=MUTED)
+        draw.text((50, top + 146), 'SYNTHETIC DATA / ACTUAL TERMINAL UI', font=font(15, mono=True), fill=MUTED)
+        key_width = draw.textlength(keys, font=font(19, mono=True))
+        draw.text((width - 50 - key_width, top + 146), keys, font=font(19, mono=True), fill=CYAN)
+        chapter_width = draw.textlength(chapter, font=font(19, mono=True))
+        draw.text((width - 50 - chapter_width, top + 30), chapter, font=font(19, mono=True), fill=GOLD)
+        return frame
     frame.paste(icon, (57, 22), icon)
     draw.text((136, 27), 'Agenturm', font=font(28, bold=True), fill=WHITE)
     draw.text((138, 65), 'A clear view of every agent.', font=font(16), fill=MUTED)
@@ -61,8 +87,21 @@ def screen_frame(source, chapter, headline, supporting, keys, icon, progress=0):
     draw.text((1852-key_width, 1030), keys, font=font(18, mono=True), fill=CYAN)
     return frame
 
-def outro(icon):
-    frame = Image.new('RGB', (WIDTH, HEIGHT), BG)
+def outro(icon, layout='wide', size=(WIDTH, HEIGHT)):
+    width, height = size
+    frame = Image.new('RGB', (width, height), BG)
+    if layout == 'readme':
+        large = Image.open(ROOT/'media/brand/icon-512.png').convert('RGBA').resize((240,240),Image.Resampling.LANCZOS)
+        frame.paste(large, ((width-240)//2, 220), large)
+        draw=ImageDraw.Draw(frame)
+        def centered(text,y,typeface,fill):
+            width_=draw.textlength(text,font=typeface)
+            draw.text(((width-width_)/2,y),text,font=typeface,fill=fill)
+        centered('Agenturm', 510, font(64,bold=True), WHITE)
+        centered('A clear view of every agent.', 610, font(30), CYAN)
+        centered('agenturm', 720, font(27,mono=True), GOLD)
+        centered('Local agent observability. Right in your terminal.', 830, font(23), MUTED)
+        return frame
     large = Image.open(ROOT/'media/brand/icon-512.png').convert('RGBA').resize((320,320),Image.Resampling.LANCZOS)
     frame.paste(large, (800,100), large)
     draw=ImageDraw.Draw(frame)
@@ -75,20 +114,22 @@ def outro(icon):
     centered('Local agent observability. Right in your terminal.', 824, font(25), MUTED)
     return frame
 
-def encode(captures, output, poster):
+def encode(captures, output, poster, layout='wide'):
     output.parent.mkdir(parents=True,exist_ok=True)
     icon=Image.open(ROOT/'media/brand/icon-128.png').convert('RGBA').resize((68,68),Image.Resampling.LANCZOS)
     images={scene[0]:raster(captures/f'{scene[0]}.svg') for scene in SCENES}
-    screenshots=ROOT/'media/screenshots'
-    screenshots.mkdir(parents=True,exist_ok=True)
-    for name,source in images.items():
-        source.save(screenshots/f'{name}.png',optimize=True)
-    raster(captures/'compact.svg').save(screenshots/'compact.png',optimize=True)
+    size=canvas_size(images[SCENES[0][0]], layout)
+    if layout == 'wide':
+        screenshots=ROOT/'media/screenshots'
+        screenshots.mkdir(parents=True,exist_ok=True)
+        for name,source in images.items():
+            source.save(screenshots/f'{name}.png',optimize=True)
+        raster(captures/'compact.svg').save(screenshots/'compact.png',optimize=True)
     first=SCENES[0]
     poster.parent.mkdir(parents=True,exist_ok=True)
-    screen_frame(images[first[0]],*first[2:],icon).save(poster,optimize=True)
-    writer=write_frames(str(output),(WIDTH,HEIGHT),fps=FPS,codec='libx264',quality=7,
-        pix_fmt_in='rgb24',pix_fmt_out='yuv420p',macro_block_size=8,
+    screen_frame(images[first[0]],*first[2:],icon,layout=layout,size=size).save(poster,optimize=True)
+    writer=write_frames(str(output),size,fps=FPS,codec='libx264',quality=7,
+        pix_fmt_in='rgb24',pix_fmt_out='yuv420p',macro_block_size=2,
         output_params=['-movflags','+faststart','-metadata','title=Agenturm — a clear view of every agent.'])
     writer.send(None)
     total=sum(scene[1] for scene in SCENES)+3
@@ -97,25 +138,28 @@ def encode(captures, output, poster):
     try:
         for name,seconds,chapter,headline,supporting,keys in SCENES:
             for i in range(seconds*FPS):
-                frame=screen_frame(images[name],chapter,headline,supporting,keys,icon,(elapsed+i/FPS)/total)
+                frame=screen_frame(images[name],chapter,headline,supporting,keys,icon,
+                                   (elapsed+i/FPS)/total,layout=layout,size=size)
                 if previous is not None and i<8:
                     frame=Image.blend(previous,frame,(i+1)/8)
                 writer.send(frame.tobytes())
             previous=frame
             elapsed+=seconds
-        ending=outro(icon)
+        ending=outro(icon,layout,size)
         for i in range(3*FPS):
             frame=Image.blend(previous,ending,(i+1)/12) if i<12 else ending
             writer.send(frame.tobytes())
     finally:
         writer.close()
-    print(f'Wrote {output}: {total}s, 1920x1080, {output.stat().st_size/1024/1024:.1f} MiB')
-    print(f'Poster: {poster}; six terminal screenshots: {screenshots}')
+    print(f'Wrote {output}: {total}s, {size[0]}x{size[1]}, {output.stat().st_size/1024/1024:.1f} MiB')
+    print(f'Poster: {poster}' + (f'; six terminal screenshots: {screenshots}' if layout == 'wide' else ''))
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--captures',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--poster',type=Path)
+    parser.add_argument('--layout', choices=('wide', 'readme'), default='wide',
+                        help='wide: 1920x1080 walkthrough video; readme: full-width terminal frame for the README GIF')
     args=parser.parse_args()
-    encode(args.captures,args.output,args.poster or args.output.with_name(args.output.stem+'-poster.png'))
+    encode(args.captures,args.output,args.poster or args.output.with_name(args.output.stem+'-poster.png'),args.layout)

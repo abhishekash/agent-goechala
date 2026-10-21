@@ -27,7 +27,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/investigation-video.md">Walkthrough and reproduction</a><br>
+  <a href="docs/investigation-video.md">Walkthrough and reproduction</a> ·
+  <a href="media/agenturm-demo.gif">Full-resolution GIF</a><br>
   <sub>Actual terminal UI. Synthetic example records. No personal prompts or session logs.</sub>
 </p>
 

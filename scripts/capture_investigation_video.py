@@ -81,7 +81,8 @@ def prepare_failure():
     snapshot.sessions[0].update({"input_tokens": 1840, "output_tokens": 326})
 
 
-async def capture(output: Path, screenshots: Path | None = None, readme_image: Path | None = None):
+async def capture(output: Path, screenshots: Path | None = None, readme_image: Path | None = None,
+                  size: tuple[int, int] = (148, 46)):
     output.mkdir(parents=True, exist_ok=True)
     if screenshots or readme_image:
         import cairosvg
@@ -92,7 +93,7 @@ async def capture(output: Path, screenshots: Path | None = None, readme_image: P
     prepare_failure()
     app = ObservatoryApp(FakeFeed())
     app.demo_mode = True
-    async with app.run_test(size=(148, 46)) as pilot:
+    async with app.run_test(size=size) as pilot:
         await pilot.pause(0.5)
         app.update_layout()
         async def save(name):
@@ -128,9 +129,15 @@ async def capture(output: Path, screenshots: Path | None = None, readme_image: P
 
 
 if __name__ == "__main__":
+    def terminal_size(value):
+        columns, rows = value.lower().split("x", 1)
+        return int(columns), int(rows)
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--screenshots", type=Path, help="Also export PNG screenshots (requires CairoSVG)")
     parser.add_argument("--readme-image", type=Path, help="Also export the agents overview as a README PNG")
+    parser.add_argument("--size", type=terminal_size, default=(148, 46),
+                        help="terminal size as COLUMNSxROWS (default: 148x46)")
     args = parser.parse_args()
-    asyncio.run(capture(args.output, args.screenshots, args.readme_image))
+    asyncio.run(capture(args.output, args.screenshots, args.readme_image, args.size))

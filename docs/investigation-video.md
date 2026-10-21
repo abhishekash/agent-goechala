@@ -35,24 +35,35 @@ uv run --with cairosvg python scripts/capture_investigation_video.py \
   --screenshots media/screenshots --readme-image media/agenturm-terminal.png
 ```
 
-Optionally render the same sequence as a 29-second video and a high-resolution
-README animation:
+Render the 29-second walkthrough from those 148-column captures:
 
 ```bash
 uv run --with cairosvg --with pillow --with imageio-ffmpeg \
   python scripts/compose_investigation_video.py \
   --captures /tmp/opencode/agenturm-capture --output /tmp/opencode/agenturm-demo.mp4
-uv run --with imageio-ffmpeg python scripts/make_readme_preview.py \
-  --video /tmp/opencode/agenturm-demo.mp4 --output media/agenturm-demo.gif
 ```
 
-The preview defaults to 1920 × 1080 at 12 fps with a 256-colour palette. Use
-`--width` or `--fps` to trade resolution for file size.
+Build the README animation from a 100-column terminal so the text stays
+legible in GitHub's content column:
+
+```bash
+uv run --with cairosvg python scripts/capture_investigation_video.py \
+  --size 100x42 --output /tmp/opencode/agenturm-readme
+uv run --with cairosvg --with pillow --with imageio-ffmpeg \
+  python scripts/compose_investigation_video.py --layout readme \
+  --captures /tmp/opencode/agenturm-readme --output /tmp/opencode/agenturm-readme.mp4
+uv run --with imageio-ffmpeg python scripts/make_readme_preview.py \
+  --video /tmp/opencode/agenturm-readme.mp4 --output media/agenturm-demo.gif
+```
+
+The preview uses the video's native resolution at 12 fps with a 256-colour
+palette. Use `--width` or `--fps` to trade resolution for file size.
 
 The capture script drives the actual TUI through its keyboard actions and
 Prompts button, and also captures an 80 × 24 terminal. The composer streams
-1920 × 1080 frames to H.264 rather than retaining a video in memory. Its source
-screens are exported to `media/screenshots/`. Fonts use DejaVu Sans and DejaVu
+1920 × 1080 frames for the wide layout and a 1600-pixel-wide frame for the
+README layout, rather than retaining a video in memory. Its source screens are
+exported to `media/screenshots/`. Fonts use DejaVu Sans and DejaVu
 Sans Mono; install those fonts before reproducing the raster/video assets.
 
 The source SVG identity lives in `media/brand/`. Its Berlin-inspired tower,
