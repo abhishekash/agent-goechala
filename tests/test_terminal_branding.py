@@ -25,6 +25,20 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
                 self.assertLessEqual(tower.region.right, brand.region.x)
                 self.assertEqual(tower.size.height, 1 if size[1] < 36 else 5)
 
+    async def test_masthead_lockup_is_centered(self):
+        app = ObservatoryApp(ManualFeed())
+        async with app.run_test(size=(200, 50)) as pilot:
+            for width, height in ((200, 50), (120, 40)):
+                await pilot.resize_terminal(width, height)
+                await pilot.pause()
+                masthead = app.query_one('#masthead')
+                lockup = app.query_one('#brand-lockup')
+                self.assertAlmostEqual(
+                    lockup.region.x + lockup.region.width / 2,
+                    masthead.region.x + masthead.region.width / 2, delta=2)
+                connection = app.query_one('#connection')
+                self.assertGreaterEqual(connection.region.right, masthead.region.right - 3)
+
     async def test_summary_and_controls_fit_without_clipping(self):
         feed = ManualFeed()
         feed.api.endpoint = 'http://127.0.0.1:4318/' + 'long-endpoint/' * 12

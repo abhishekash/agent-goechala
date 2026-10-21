@@ -46,7 +46,8 @@ visible through borders and selected rows. The identity is static: no flashing
 logo or decorative loading animation. The terminal uses a five-column, five-row
 block-and-line tower in its own bounded widget beside a bold, single-line
 **Agenturm** wordmark, a slim divider, and the uppercase tagline. Demo mode adds
-a filled amber **DEMO** badge. Short terminals use a one-line mark and drop the
+a filled amber **DEMO** badge. The lockup is centered horizontally, while the
+connection status stays at the right edge. Short terminals use a one-line mark and drop the
 tagline. No image protocols, emoji rendering, or Nerd
 Font is required. Below 100 columns, summary cards form two rows; longer explanations
 live in tooltips rather than running off the edge of a card.

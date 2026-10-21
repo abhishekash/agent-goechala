@@ -644,10 +644,11 @@ class ObservatoryApp(App):
     Screen { background: $agent-canvas; color: $agent-text; }
     Screen > .screen--selection { background: $agent-selection; color: $agent-on-selection; }
     * { scrollbar-color: $agent-scrollbar; scrollbar-color-hover: $agent-secondary; scrollbar-color-active: $agent-primary; scrollbar-background: $agent-surface; scrollbar-background-hover: $agent-surface; scrollbar-background-active: $agent-surface; }
-    #masthead { height: 6; padding: 0 2; align-vertical: middle; background: $agent-canvas; border-bottom: solid $agent-border-subtle; }
+    #masthead { layout: grid; grid-size: 3; grid-columns: 1fr auto 1fr; grid-rows: 5; height: 6; padding: 0 2; align-vertical: middle; background: $agent-canvas; border-bottom: solid $agent-border-subtle; }
+    #brand-lockup { width: auto; height: 5; align-vertical: middle; }
     #tower { width: 5; height: 5; margin-right: 2; }
-    #brand { width: 1fr; height: 1; margin-top: 2; color: $agent-text; text-wrap: nowrap; }
-    #connection { width: auto; max-width: 50%; height: 1; margin-top: 2; color: $agent-success; text-align: right; text-wrap: nowrap; text-overflow: ellipsis; }
+    #brand { width: auto; height: 1; color: $agent-text; text-wrap: nowrap; }
+    #connection { width: 100%; height: 1; color: $agent-success; text-align: right; text-wrap: nowrap; text-overflow: ellipsis; }
     #summary { height: 3; margin: 1 2; grid-size: 4; grid-columns: 1fr; grid-rows: 3; }
     .stat { height: 3; min-width: 0; border-left: solid $agent-border-subtle; background: $agent-surface; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
     #stat-sessions { border-left: solid $agent-primary; }
@@ -748,9 +749,9 @@ class ObservatoryApp(App):
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail, .narrow #trace-detail { width: 100%; height: 1fr; }
     .small #summary { height: 6; grid-size: 2; }
-    .small #connection { max-width: 40%; }
     .small #pause { width: 9; }
-    .compact #masthead { height: 1; border-bottom: none; }
+    .compact #masthead { height: 1; grid-rows: 1; border-bottom: none; }
+    .compact #brand-lockup { height: 1; }
     .compact #tower { height: 1; }
     .compact #brand, .compact #connection { margin-top: 0; }
     .compact #summary { height: 2; margin: 1 1 0 1; grid-rows: 2; }
@@ -842,8 +843,10 @@ class ObservatoryApp(App):
 
     def compose(self)->ComposeResult:
         with Horizontal(id='masthead'):
-            yield Static(tower_mark(), id='tower')
-            yield Static(masthead(), id='brand')
+            yield Static('', id='masthead-left')
+            with Horizontal(id='brand-lockup'):
+                yield Static(tower_mark(), id='tower')
+                yield Static(masthead(), id='brand')
             yield Static('○ Connecting',id='connection',markup=False)
         with Grid(id='summary'):
             for name in ('sessions','processes','mcp-count','usage'):
