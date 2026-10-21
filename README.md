@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/brand/icon.svg" alt="Agenturm: a Berlin-inspired tower with a purple observation sphere and magnifying glass" width="72" height="72">
+  <img src="media/brand/icon.svg" alt="Agenturm: a Berlin-inspired tower with a purple observation sphere and magnifying glass" width="160" height="160">
 </p>
 
 <h1 align="center">Agenturm</h1>
