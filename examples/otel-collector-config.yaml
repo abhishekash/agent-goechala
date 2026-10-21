@@ -1,5 +1,5 @@
 # Local OTLP relay for agent SDKs. The Collector listens on loopback and
-# forwards all three signals into Agent Goechala's OTLP/HTTP receiver.
+# forwards all three signals into Agenturm's OTLP/HTTP receiver.
 receivers:
   otlp:
     protocols:

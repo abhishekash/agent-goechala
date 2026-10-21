@@ -1,19 +1,19 @@
-# Agent Goechala identity
+# Agenturm identity
 
 **A clear view of every agent.**
 
-Goechala is a mountain pass. The logo shows two faceted mountain ridges framing an
-open saddle, with a bright trail leading through it. The subject is the pass
-and the way through: an overview that helps you find the next useful detail.
+The logo is a geometric watchtower: three battlements, a single observation
+window, and a solid amber silhouette. It represents a clear vantage point over
+agent activity, not control of the agents. The wordmark is simply **Agenturm**.
 
 ## Assets
 
 | Asset | Use |
 | --- | --- |
-| [Pass mark](../media/brand/icon.svg) | App icon, avatar, square placements |
-| [Transparent mark](../media/brand/icon-transparent.svg) | Dark backgrounds and overlays |
+| [Tower mark](../media/brand/icon.svg) | App icon, avatar, square placements |
+| [Transparent tower](../media/brand/icon-transparent.svg) | Dark backgrounds and overlays |
 | [Wordmark](../media/brand/logo.svg) | Dark headers and presentations |
-| [README hero](../media/brand/hero.svg) | Repository homepage |
+| [Hero](../media/brand/hero.svg) | Presentations and wide placements |
 | [Social preview](../media/brand/social-preview.png) | GitHub repository social image, 1280 × 640 |
 
 PNG icon exports are available at 32, 64, 128, 256, 512, and 1024 pixels.
@@ -28,26 +28,33 @@ space around it. At small sizes, use the mark without a wordmark.
 | Night | `#191621` | Panels |
 | Violet grey | `#242030` | Raised surfaces and controls |
 | Amber | `#ffbd69` | Active navigation, keyboard focus, current work |
-| Lavender | `#c5adff` | Detail headings, tool inventory, mountain face |
+| Lavender | `#c5adff` | Detail headings and tool inventory |
 | Mint | `#86e3b5` | Successful calls and healthy activity |
 | Ice | `#86d9ed` | Usage values |
-| Frost | `#f6f0e8` | Primary text and the trail through the pass |
+| Frost | `#f6f0e8` | Primary text |
 | Slate | `#b9afc5` | Supporting text |
 | Rose | `#ff8799` | Failures, accompanied by an explicit status label |
 
 Use color to support text, never as the sole status indicator. Focus remains
 visible through borders and selected rows. The identity is static: no flashing
-logo or decorative loading animation. The terminal uses a text version of the
-same pass mark, with two colored ridges and a contrasting saddle. Wide terminals
-use a two-line block silhouette; compact terminals use `◢◣_◢◣`. Neither needs
-image protocols, emoji rendering, or a Nerd Font.
+logo or decorative loading animation. The terminal uses the standard monochrome
+Unicode tower `♜` followed by **Agenturm**, always on one line. No multi-line
+ASCII art, image protocols, emoji rendering, or Nerd Font is required.
+
+## Terminal themes
+
+The command palette exposes exactly four themes: **Current** (Alpine Ember,
+the default), **Bright** (light), **Dark** (cool charcoal), and **Solarized**
+(blue-green dark). Open **Ctrl+P → Theme** to switch. Panels, table rows,
+controls, evidence text, and syntax backgrounds follow the selected palette.
 
 ## Naming and compatibility
 
-- Product: **Agent Goechala**
-- Repository, Python distribution, and command: **agent-goechala**
-- JavaScript client: **@agent-goechala/client**
-- Former name: Agent Observatory
+- Product: **Agenturm**
+- Repository, Python distribution, and primary command: **agenturm**
+- Compatibility commands: **agent-goechala**, **agent-observatory**
+- JavaScript client: **@agenturm/client**
+- Former names: Agent Observatory, Agent Goechala
 
 The `observatory` Python import, `OBSERVATORY_*` settings, telemetry attribute
 names, and the default `observatory.db` filename remain compatible. Existing
@@ -69,7 +76,7 @@ video, animated preview, and actual terminal screenshots.
 The presentation takes cues from [Lazygit's explicit focus styling](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md),
 [btop's use of distinct panel accents](https://github.com/aristocratos/btop), and
 [Glow's typography and color hierarchy](https://github.com/charmbracelet/glow).
-The pass artwork is original. Amber marks the active view; supporting labels
+The tower artwork is original. Amber marks the active view; supporting labels
 remain neutral, and status always has a text label as well as color.
 
 Primary text, supporting text, status accents, and active-tab text are checked

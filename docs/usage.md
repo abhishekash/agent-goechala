@@ -2,14 +2,14 @@
 
 Shows agent and session IDs, repo/project, lifecycle status, update age, pending wait, and task details. MCP server calls now link across start/result events, expose qualified Claude Code and Codex tool names, report completion/error status, and include all stored history in server counts. Optional provider-backed session summaries run only when requested. DuckDB guidance is in [the storage evaluation](decisions/duckdb.md).
 
-# Agent Goechala
+# Agenturm
 
 A terminal-first monitor and local telemetry receiver for AI agents. It discovers supported local agent sessions, then accepts **OTLP/HTTP traces, logs, and metrics in protobuf or JSON** from instrumented runtimes and the existing **agent-harness JSONL** format. The terminal cockpit shows agents, activity, MCP calls, traces, host processes, and metrics. Data lives in SQLite. The receiver uses Python's standard library (3.11+); the terminal UI uses Textual.
 
 ## GitHub Copilot CLI telemetry
 
 Copilot CLI can send its built-in OpenTelemetry traces and metrics directly to
-the cockpit receiver. Start `agent-goechala` in one terminal, then launch
+the cockpit receiver. Start `agenturm` in one terminal, then launch
 Copilot CLI from the project in another:
 
 ```bash
@@ -35,20 +35,20 @@ describe the emitted signals and optional content capture.
 Python 3.11+ is required. Install the CLI in an isolated environment with [uv tools](https://docs.astral.sh/uv/guides/tools/):
 
 ```bash
-uv tool install --force git+https://github.com/abhishekash/agent-goechala
-agent-goechala
+uv tool install --force git+https://github.com/abhishekash/agenturm
+agenturm
 ```
 
-If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install "agent-goechala @ git+https://github.com/abhishekash/agent-goechala"`.
+If uv is not installed, use its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/). If the installed command is missing from your PATH, run `uv tool update-shell` and open a new terminal. You can also install into an active Python environment with `python -m pip install "agenturm @ git+https://github.com/abhishekash/agenturm"`.
 
-The cockpit opens a tabbed interface for Agents, Activity, MCP Calls, Traces, Host, Metrics, and Findings. The Agents view shows individual sessions, tasks, models, recent work, and an immediate recorded-progress summary. Findings provides a searchable, paged review queue with occurrence counts, evidence links, and direct navigation to the source trace. Session counts and live process counts are separate; approval reviews are hidden by default. The cockpit attaches to a receiver on **127.0.0.1:14318**, or starts one there. Run `agent-goechala` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
+The cockpit opens a tabbed interface for Agents, Activity, MCP Calls, Traces, Host, Metrics, and Findings. The Agents view shows individual sessions, tasks, models, recent work, and an immediate recorded-progress summary. Findings provides a searchable, paged review queue with occurrence counts, evidence links, and direct navigation to the source trace. Session counts and live process counts are separate; approval reviews are hidden by default. The cockpit attaches to a receiver on **127.0.0.1:14318**, or starts one there. Run `agenturm` for full-screen panels in your current terminal. From this checkout, `python3 -m observatory` also works without installation.
 
 ### Existing Codex and Claude Code agents
 
 Local receivers automatically discover recent session files under `~/.codex/sessions` and `~/.claude/projects` (`CODEX_HOME` and `CLAUDE_CONFIG_DIR` are respected). Start the monitor with no agent filename or Python environment flags:
 
 ```bash
-agent-goechala
+agenturm
 ```
 
 It reads actual logged activity as files update, including already running sessions. Agents need no restart or configuration change. Source logs stay untouched. Select an agent to see a zero-setup progress summary and its recent activity. When a session explicitly asks for a user reply or approval, the monitor points you to that agent's own terminal; it cannot submit the answer or approve actions for the agent.
@@ -96,8 +96,8 @@ does not infer a waiting-for-approval state from inactivity.
 Native session discovery is automatic for supported local agents. For another Python agent, automatic SDK capture is a separate command-line workflow; the monitoring cockpit itself does not launch agents. Install the capture extra into the agent's environment:
 
 ```bash
-uv pip install --python .venv/bin/python 'agent-goechala[auto] @ git+https://github.com/abhishekash/agent-goechala'
-agent-goechala run --endpoint http://127.0.0.1:14318 --service my-agent agent.py
+uv pip install --python .venv/bin/python 'agenturm[auto] @ git+https://github.com/abhishekash/agenturm'
+agenturm run --endpoint http://127.0.0.1:14318 --service my-agent agent.py
 ```
 
 Replace the environment path, service name, and agent filename with your own. Arguments after `agent.py` go to the script; `--module` runs a Python module. If Goechala is already installed in the active agent environment, use `python -m observatory run --endpoint http://127.0.0.1:14318 --service my-agent agent.py`.
@@ -120,18 +120,18 @@ Quitting closes only the cockpit and any receiver it started. Agents and separat
 
 ```bash
 # Connect to an existing receiver without starting one:
-agent-goechala cockpit --endpoint http://127.0.0.1:14318
+agenturm cockpit --endpoint http://127.0.0.1:14318
 # Print a snapshot for shell use:
-agent-goechala cockpit --endpoint http://127.0.0.1:14318 --once
+agenturm cockpit --endpoint http://127.0.0.1:14318 --once
 # Reinstall after updating this checkout:
-uv tool install --reinstall ./agent-goechala
+uv tool install --reinstall ./agenturm
 ```
 
 The current terminal is the default. Add `--new-window` only when you want a separate graphical terminal (Terminal on macOS; GNOME Terminal, Konsole, or x-terminal-emulator/xterm on Linux; Windows Terminal on Windows). In SSH or headless sessions, use the default. The Textual interface supports Linux, macOS and Windows terminals without a curses dependency.
 
 ## Capture an agent without changing its code
 
-For Python agents that use supported model SDKs, install the automatic capture extra and run `agent-goechala run` from the agent's own environment. This is a separate terminal command; the monitoring cockpit remains read-only and does not start or control an agent.
+For Python agents that use supported model SDKs, install the automatic capture extra and run `agenturm run` from the agent's own environment. This is a separate terminal command; the monitoring cockpit remains read-only and does not start or control an agent.
 
 For example, start a persistent local receiver on port 14318:
 
@@ -171,7 +171,7 @@ The replay uses the current SDKs' `httpx2` mock transport and records an OpenAI 
 ## Run
 
 ```bash
-cd agent-goechala
+cd agenturm
 python3 -m observatory --db ./observatory.db serve
 # The root address is a plain-text receiver status page; use the terminal cockpit to inspect activity.
 ```
@@ -246,7 +246,7 @@ npm install ./clients/javascript
 ```
 
 ```js
-import { Client } from '@agent-goechala/client';
+import { Client } from '@agenturm/client';
 
 const telemetry = new Client({
   service: 'javascript-research-agent',
@@ -271,7 +271,7 @@ Nested spans follow asynchronous execution context, including spans started insi
 For automatic callback capture in LangChain and LangGraph, install the optional adapter:
 
 ```bash
-pip install 'agent-goechala[langchain] @ git+https://github.com/abhishekash/agent-goechala'
+pip install 'agenturm[langchain] @ git+https://github.com/abhishekash/agenturm'
 ```
 
 Attach the handler inside an Goechala run and pass it through the runnable config. It records nested chain, model, tool, and retriever spans; captures standardized token usage when the model supplies it; records errors; and maps LangChain custom callbacks named `progress`, `agent.progress`, or `langgraph.progress` into the run timeline. LangGraph applications that use custom stream output can call `run.aprogress(...)` as they consume those events. Prompts, tool inputs, and outputs stay out of telemetry unless `capture_content=True` is set.
@@ -290,7 +290,7 @@ with telemetry.trace(task="Research a question", session_id="thread-42") as run:
 For the OpenAI Agents SDK, install its optional exporter and add the batching processor to the SDK tracing provider:
 
 ```bash
-pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'
+pip install 'agenturm[openai-agents] @ git+https://github.com/abhishekash/agenturm'
 ```
 
 ```python
@@ -401,7 +401,7 @@ For another OpenAI-compatible provider, set these in the terminal that launches 
 export OBSERVATORY_SUMMARY_URL='https://api.openai.com/v1/chat/completions'
 export OBSERVATORY_SUMMARY_MODEL='YOUR_MODEL_ID'
 # The existing OPENAI_API_KEY is reused unless OBSERVATORY_SUMMARY_KEY_ENV selects another variable.
-agent-goechala
+agenturm
 ```
 
 The URL is the full **Chat Completions** endpoint, and the model must be available to

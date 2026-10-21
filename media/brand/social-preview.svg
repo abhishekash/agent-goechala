@@ -1,24 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
-<title id="title">Agent Goechala social card</title>
-<desc id="desc">Amber and lavender mountain ridges frame an open pass. A bright winding trail leads through the saddle toward the rising sun.</desc>
+<title id="title">Agenturm social card</title>
+<desc id="desc">A geometric amber tower with three battlements and a single observation window.</desc>
 
 <rect width="1280" height="640" fill="#121018"/>
-<g transform="translate(470 22) scale(.66)"><defs>
-  <linearGradient id="warm-ridge" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#ffe6bd"/><stop offset=".5" stop-color="#ffbd69"/><stop offset="1" stop-color="#d87946"/></linearGradient>
-  <linearGradient id="cool-ridge" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#eee4ff"/><stop offset=".5" stop-color="#c5adff"/><stop offset="1" stop-color="#8262bc"/></linearGradient>
-</defs>
+<g transform="translate(470 22) scale(.66)">
 
-  <circle cx="265" cy="176" r="26" fill="#ffbd69"/>
-  <path d="M64 356 177 122 258 271 231 319 280 356Z" fill="url(#warm-ridge)"/>
-  <path d="m177 122 24 143 30 54 27-48Z" fill="#a34e36"/>
-  <path d="M258 271 345 161 449 356H280l-49-37Z" fill="url(#cool-ridge)"/>
-  <path d="m345 161-19 128-46 67h169Z" fill="#7960a4"/>
-  <path d="m177 122-37 77 37-22 28 20Z" fill="#fff0d6"/>
-  <path d="m345 161-36 46 36-13 25 10Z" fill="#f0e8ff"/>
-  <path d="m258 271-24 49 47 37-56 57" fill="none" stroke="#121018" stroke-width="34" stroke-linejoin="round"/>
-  <path d="m258 271-24 49 47 37-56 57" fill="none" stroke="#f6f0e8" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M144 112h48v48h40v-48h48v48h40v-48h48v112h-40l16 144h24v40H144v-40h24l16-144h-40Z
+           M240 264v56h32v-56a16 16 0 0 0-32 0Z" fill="#ffbd69" fill-rule="evenodd"/>
 </g>
-<text x="640" y="428" fill="#f6f0e8" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="62">Agent Goechala</text>
+<text x="640" y="428" fill="#f6f0e8" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="62">Agenturm</text>
 <text x="640" y="488" fill="#c5adff" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
 <text x="640" y="568" fill="#b9afc5" text-anchor="middle" font-family="DejaVu Sans Mono,monospace" font-size="17">LOCAL OBSERVABILITY  /  RIGHT IN YOUR TERMINAL</text>
 

@@ -431,7 +431,7 @@ def print_snapshot(feed):
         if record.get(key + '_reported') is False:
             return 'Not reported'
         return number(record.get(key))
-    print("AGENT GOECHALA  " + feed.api.endpoint)
+    print("AGENT AGENTURM  " + feed.api.endpoint)
     if snapshot.local_status.get("enabled"):
         mode = "bounded, redacted content" if snapshot.local_status.get('capture_content') else "metadata only"
         opencode_count=sum(entry.get('runtime')=='OpenCode' for entry in snapshot.local_status.get('sessions',[]))

@@ -1,8 +1,8 @@
-"""Agent Goechala's Alpine Ember palette and terminal pass mark."""
+"""Agenturm's Alpine Ember palette and tower mark."""
 from rich.text import Text
 
-NAME = "Agent Goechala"
-COMMAND = "agent-goechala"
+NAME = "Agenturm"
+COMMAND = "agenturm"
 TAGLINE = "A clear view of every agent."
 AMBER = "#ffbd69"
 LAVENDER = "#c5adff"
@@ -15,26 +15,15 @@ CYAN, GOLD = ICE, AMBER
 
 
 def masthead(demo=False, compact=False):
-    """A two-line block mark: warm and cool ridges meeting at an open pass.
+    """A single-line tower and name, visible even in a compact terminal.
 
-    Compact layouts get a one-line mark. Standard Unicode shapes avoid an
-    emoji or Nerd Font dependency.
+    The monochrome rook is a standard Unicode tower, not an emoji or a
+    multi-line drawing that can push the product name outside the header.
     """
-    if compact:
-        text = Text.assemble(
-            ("◢◣", f"bold {AMBER}"), ("_", FROST),
-            ("◢◣  ", f"bold {LAVENDER}"), ("GOECHALA", f"bold {FROST}"))
-        if demo:
-            text.append("  /  DEMO", style=AMBER)
-        return text
     text = Text.assemble(
-        ("  ◢◣", f"bold {AMBER}"), ("   ◢◣   ", f"bold {LAVENDER}"),
-        ("GOECHALA", f"bold {FROST}"), ("  /  AGENT MONITOR", MUTED))
+        ("♜", f"bold {AMBER}"), ("  Agenturm", f"bold {FROST}"))
+    if not compact:
+        text.append("  /  Agent monitor", style=MUTED)
     if demo:
         text.append("  /  DEMO", style=AMBER)
-    text.append("\n")
-    text.append(" ◢██◣", style=AMBER)
-    text.append("╱", style=FROST)
-    text.append("◢██◣", style=LAVENDER)
-    text.append("  A clear view of every agent.", style=MUTED)
     return text

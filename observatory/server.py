@@ -58,7 +58,7 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                 return
             path = route.path
             if path == "/":
-                data = ("Agent Goechala is terminal-first. Run `agent-goechala` in a terminal "
+                data = ("Agenturm is terminal-first. Run `agenturm` in a terminal "
                         "to monitor local sessions. This HTTP service receives OTLP and serves the local API.\n").encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")

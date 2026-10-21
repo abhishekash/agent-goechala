@@ -1,10 +1,10 @@
-# Agent Goechala walkthrough
+# Agenturm walkthrough
 
 [Watch the 29-second 1080p MP4](../media/goechala-demo.mp4),
 [view the animated README preview](../media/goechala-demo-preview.gif), or
 [open the poster](../media/goechala-demo-poster.png).
 
-This walkthrough uses **actual Textual screenshots of Agent Goechala**, assembled
+This walkthrough uses **actual Textual screenshots of Agenturm**, assembled
 into a captioned video. The examples are synthetic. The capture uses an in-memory
 feed: it does not read personal prompts, local agent logs, a receiver, or a real
 database. There is no paid model call or voiceover.
@@ -18,7 +18,7 @@ database. There is no paid model call or voiceover.
 | 10–14s | See which tool call failed. | Inspect the observed MCP call list |
 | 14–20s | Open the evidence. | Expand the failed GitHub request and its indented JSON response |
 | 20–26s | Follow the call into its execution. | Follow the MCP operation to its linked execution tree |
-| 26–29s | Agent Goechala. A clear view of every agent. | Mountain-pass mark and the new command |
+| 26–29s | Agenturm. A clear view of every agent. | Tower mark and the new command |
 
 The observed request returned HTTP 403, `API rate limit exceeded`. The demo does
 not claim that checkout was fixed: the agent has not yet fetched the pull request.

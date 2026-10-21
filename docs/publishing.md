@@ -1,15 +1,15 @@
 # Publishing to PyPI
 
-The Python distribution and installed command are named `agent-goechala`. The former `agent-observatory` command remains a compatibility alias.
+The Python distribution and primary command are named `agenturm`. The former `agent-goechala` and `agent-observatory` commands remain compatibility aliases.
 
-The rename does not publish a new package automatically. Register the new pending publisher below before tagging the first renamed release. Existing publishers for `agent-observatory-cli` do not authorize this new distribution.
+The rename does not publish a new package automatically. Register the pending publisher below before tagging the first Agenturm release. `agenturm` is a new PyPI distribution and needs its own Trusted Publisher registration.
 
 ## First release
 
 1. On PyPI, open **Account settings → Publishing** and add a pending GitHub Actions publisher:
-   - PyPI project: `agent-goechala`
+   - PyPI project: `agenturm`
    - Owner: `abhishekash`
-   - Repository: `agent-goechala`
+   - Repository: `agenturm`
    - Workflow: `publish.yml`
    - Environment: `pypi`
 2. Choose a version and update `pyproject.toml` and `uv.lock`. After those
