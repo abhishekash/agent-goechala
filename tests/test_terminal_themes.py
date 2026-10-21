@@ -1,11 +1,12 @@
 """The palette exposes only supported themes, and each changes the actual UI."""
 import unittest
+from types import SimpleNamespace
 
 from textual.command import CommandPalette
 from textual.widgets import Input
 
 from observatory.terminal_ui import ObservatoryApp, evidence_syntax
-from observatory.themes import PALETTES
+from observatory.themes import PALETTES, themed_style
 from tests.test_terminal_search import ManualFeed
 
 
@@ -45,3 +46,7 @@ class ThemePickerTest(unittest.IsolatedAsyncioTestCase):
         for name, colors in PALETTES.items():
             syntax = evidence_syntax('{"status": "ok"}', 'json', name)
             self.assertEqual(syntax.background_color, colors['surface'])
+
+    def test_theme_translation_does_not_remap_replacement_colors(self):
+        widget = SimpleNamespace(app=SimpleNamespace(theme='Bright'))
+        self.assertEqual(themed_style(widget, '#121018 on #c5adff'), '#ffffff on #594095')

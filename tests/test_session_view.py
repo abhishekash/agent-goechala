@@ -9,6 +9,37 @@ from tests.test_terminal_search import ManualFeed
 
 
 class SessionViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tasks_get_spare_width_and_wrap_without_expanding_missing_rows(self):
+        feed=ManualFeed()
+        task=('Investigate the checkout regression and improve keyboard navigation '
+              'for the payment form before preparing the next release.')
+        feed.snapshot.local_status['sessions'][0]['task']=task
+        feed.snapshot.local_status['sessions'][1]['task']='Task not reported'
+        app=ObservatoryApp(feed)
+        async with app.run_test(size=(160,48)) as pilot:
+            for size in ((160,48),(120,40),(160,48)):
+                await pilot.resize_terminal(*size)
+                await pilot.pause()
+                table=app.query_one('#agent-table',DataTable)
+                self.assertNotIn('Waiting on',[str(column.label) for column in table.columns.values()])
+                self.assertGreater(table.column_widths[-1],table.column_widths[2]*3)
+                self.assertEqual(table.rows['source-1'].height,2)
+                self.assertEqual(table.rows['source-2'].height,1)
+                task_cell=table.get_row('source-1')[-1]
+                self.assertFalse(task_cell.no_wrap)
+                rendered='\n'.join(table.render_line(row).text for row in range(table.size.height))
+                self.assertIn('Investigate the checkout',rendered)
+                self.assertIn('keyboard navigation',rendered)
+                self.assertIn(task,app.query_one('#agent-detail').plain_text.replace('\n',' '))
+                self.assertIn('italic',str(table.get_row('source-2')[-1].style))
+            # Live updates can shrink a wrapped row without changing row identity.
+            feed.snapshot.local_status['sessions'][0]['task']='Fix checkout'
+            app.last_update=-1
+            app.refresh_data()
+            await pilot.pause()
+            self.assertEqual(table.rows['source-1'].height,1)
+            self.assertEqual(table.get_row('source-1')[-1].plain,'Fix checkout')
+
     async def test_columns_waiting_and_summary_are_bound_to_selected_session(self):
         feed = ManualFeed()
         entry = feed.snapshot.local_status['sessions'][0]
@@ -25,10 +56,10 @@ class SessionViewTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.pause()
                     table = app.query_one('#agent-table', DataTable)
                     self.assertEqual([str(c.label) for c in table.columns.values()],
-                        ['Agent', 'Session ID', 'Repo / project', 'Status', 'Updated', 'Waiting on', 'Task / details'])
+                        ['Agent', 'Session ID', 'Repo / project', 'Status', 'Updated', 'Task / details'])
                     row = ' '.join(str(value) for value in table.get_row_at(0))
                     self.assertIn('NEEDS REPLY', row)
-                    self.assertIn('Reply · Codex terminal', row)
+                    self.assertNotIn('Reply · Codex terminal', row)
                     detail = app.query_one('#agent-detail').plain_text
                     self.assertIn('Progress Summary · Recorded Activity', detail)
                     self.assertIn('Current: Waiting', detail)
@@ -96,7 +127,7 @@ class SessionViewTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(next(iter(table.rows)).value, 'source-2')
             row = ' '.join(str(value) for value in table.get_row_at(0))
             self.assertIn('NEEDS APPROVAL', row)
-            self.assertIn('Approval · Claude terminal', row)
+            self.assertIn('Claude terminal', app.query_one('#agent-detail').plain_text)
 
     async def test_prompts_filter_shows_only_user_messages_for_scoped_agent(self):
         feed = ManualFeed()

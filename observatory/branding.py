@@ -14,16 +14,23 @@ MUTED = "#b9afc5"
 CYAN, GOLD = ICE, AMBER
 
 
-def masthead(demo=False, compact=False):
-    """A single-line tower and name, visible even in a compact terminal.
+def tower_mark(compact=False):
+    """A Berlin-style broadcast tower in standard terminal characters."""
+    if compact:
+        return Text('─●─', style=LAVENDER)
+    text = Text('  ╿  \n', style=AMBER)
+    text.append(' ▗', style=LAVENDER)
+    text.append('⌕', style=f'#121018 on {LAVENDER}')
+    text.append('▖ \n ▝▀▘ \n', style=LAVENDER)
+    text.append('  ┃  \n ━┻━ ', style=AMBER)
+    return text
 
-    The monochrome rook is a standard Unicode tower, not an emoji or a
-    multi-line drawing that can push the product name outside the header.
-    """
-    text = Text.assemble(
-        ("♜", f"bold {AMBER}"), ("  Agenturm", f"bold {FROST}"))
+
+def masthead(demo=False, compact=False):
+    """Keep the wordmark on one line; the tower has its own bounded widget."""
+    text = Text("Agenturm", style=f"bold {FROST}")
     if not compact:
-        text.append("  /  Agent monitor", style=MUTED)
+        text.append("  /  AGENT MONITOR", style=f"not bold {MUTED}")
     if demo:
         text.append("  /  DEMO", style=AMBER)
     return text

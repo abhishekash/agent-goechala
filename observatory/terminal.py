@@ -130,6 +130,9 @@ class Snapshot:
 
 
 class Feed:
+    POLL_SECONDS = 2
+    EXTRA_POLL_SECONDS = 5
+
     def __init__(self, api):
         self.api = api
         self.snapshot = Snapshot()
@@ -197,7 +200,7 @@ class Feed:
                     raise
                 activity, activity_results = [], []
             scope = (service, session_id, mcp_query, include_reviews, history['mcp'])
-            if self.extra_cache is None or scope != self.extra_scope or time.monotonic()-self.extra_updated>3:
+            if self.extra_cache is None or scope != self.extra_scope or time.monotonic()-self.extra_updated>self.EXTRA_POLL_SECONDS:
                 sessions = self.api.get('/api/sessions?limit=500')['sessions']
                 try:
                     mcp_params = {'limit':100,'service':service,'session_id':session_id,
@@ -280,7 +283,7 @@ class Feed:
                 findings = self.api.get("/api/findings?limit=8")["findings"]
             findings_scope=history['findings']
             if (self.findings_cache is None or self.findings_scope!=findings_scope or
-                    time.monotonic()-self.findings_updated>3):
+                    time.monotonic()-self.findings_updated>self.EXTRA_POLL_SECONDS):
                 finding_params={'limit':100,'cursor':findings_scope[-1] or ''}
                 finding_page=self.api.get('/api/findings?'+urlencode(finding_params))
                 self.findings_cache=finding_page
@@ -348,7 +351,7 @@ class Feed:
             if not self.paused or self.refresh_once:
                 self.refresh_once = False
                 self.refresh()
-            self.wake.wait(1)
+            self.wake.wait(self.POLL_SECONDS)
             self.wake.clear()
 
     def close(self):

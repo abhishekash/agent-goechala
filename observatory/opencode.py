@@ -1,6 +1,7 @@
 """Read-only OpenCode session capture from its local SQLite database."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -104,6 +105,10 @@ class OpenCodeReader:
         self.errors = 0
         self.updated_ns = 0
         self.mcp_servers = ()
+        # Fixed-size digests, bounded to the current session/message window.
+        # Never keep tool payloads or an unbounded history in memory.
+        self._message_revisions = {}
+        self._progress_revisions = {}
 
     def set_mcp_servers(self, server_names):
         """Set OpenCode server names discovered from config, without settings."""
@@ -113,6 +118,7 @@ class OpenCodeReader:
             # Re-read persisted spans so newly discovered configuration can
             # enrich tool records that were initially ingested without it.
             self.fingerprint = None
+            self._message_revisions.clear()
 
     @staticmethod
     def _tables(db):
@@ -196,12 +202,17 @@ class OpenCodeReader:
             self.sessions = []
             self.discovered_sessions = 0
             self.omitted_sessions = 0
+            self.fingerprint = None
+            self._message_revisions.clear()
+            self._progress_revisions.clear()
             return 0
         if fingerprint == self.fingerprint:
             return 0
         accepted = []
         progress_logs = []
         sessions = []
+        message_revisions = {}
+        progress_revisions = {}
         try:
             uri = self.path.resolve().as_uri() + "?mode=ro"
             with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as db:
@@ -284,6 +295,38 @@ class OpenCodeReader:
                         root_id = identity("opencode-root", session_id, message_id, size=16)
                         if latest_trace is None:
                             latest_trace, latest_root_id = trace_id, root_id
+                        # A write anywhere in OpenCode's DB used to re-import
+                        # every recent message, including large tool outputs.
+                        # Check cheap part revisions first. Older schemas without
+                        # update timestamps fall back to content comparison.
+                        parts = []
+                        has_parts = "part" in tables and {"id", "session_id", "message_id", "data"} <= part_columns
+                        part_order = ' ORDER BY "time_created","id"' if "time_created" in part_columns else ' ORDER BY "id"'
+                        part_params = (session_id, message_id, MAX_PARTS_PER_MESSAGE)
+                        part_query = ' FROM "part" WHERE "session_id"=? AND "message_id"=?' + part_order + ' LIMIT ?'
+                        if has_parts:
+                            revision_field = 'time_updated' if 'time_updated' in part_columns else 'data'
+                            part_versions = [tuple(row) for row in db.execute(
+                                'SELECT "id","' + revision_field + '"' + part_query, part_params)]
+                            if revision_field == 'time_updated' and any(row[1] is None for row in part_versions):
+                                # A nullable/unpopulated revision is not evidence
+                                # that a payload is unchanged.
+                                revision_field = 'data'
+                                part_versions = [tuple(row) for row in db.execute(
+                                    'SELECT "id","data"' + part_query, part_params)]
+                            if revision_field == 'data':
+                                parts = part_versions
+                        else:
+                            part_versions = []
+                        revision = hashlib.sha256(json.dumps(
+                            (read_table, dict(message), data.get("title"), data.get("model"), project, part_versions),
+                            ensure_ascii=False, sort_keys=True).encode()).digest()
+                        key = (session_id, message_id)
+                        message_revisions[key] = revision
+                        if self._message_revisions.get(key) == revision:
+                            continue
+                        if has_parts and revision_field == 'time_updated':
+                            parts = db.execute('SELECT "id","data"' + part_query, part_params).fetchall()
                         message_created = message["time_created"] if "time_created" in message.keys() else 0
                         message_updated = message["time_updated"] if "time_updated" in message.keys() else message_created
                         start_ns = _first_timestamp((message_data.get("time") or {}).get("created"), message_created)
@@ -333,12 +376,9 @@ class OpenCodeReader:
                                 "status": "ERROR" if state == "error" else "OK", "attributes": model_attrs,
                                 "resource_attributes": {"service.name": "opencode", "observatory.source_id": self.source_id},
                                 "scope_name": "observatory.opencode"}, "opencode"))
-                        if "part" not in tables or not {"id", "session_id", "message_id", "data"} <= part_columns:
-                            continue
-                        parts = db.execute(f'SELECT "id","data" FROM "part" WHERE "session_id"=? AND "message_id"=? ORDER BY "time_created" LIMIT ?',
-                                           (session_id, message_id, MAX_PARTS_PER_MESSAGE)).fetchall()
                         for part in parts:
-                            part_data = _json(part["data"])
+                            part_id, raw_part = part
+                            part_data = _json(raw_part)
                             if part_data.get("type") != "tool":
                                 continue
                             tool_name = str(part_data.get("tool") or "tool")[:256]
@@ -366,7 +406,7 @@ class OpenCodeReader:
                                     tool_attrs["output.value"] = safe(tool_state["output"], 4000)
                             if tool_end < tool_start:
                                 tool_start = tool_end
-                            span_id = identity("opencode-tool", session_id, part["id"], size=16)
+                            span_id = identity("opencode-tool", session_id, part_id, size=16)
                             accepted.append(normalize_native({"trace_id": trace_id, "span_id": span_id,
                                 "parent_span_id": model_id or root_id, "name": tool_name,
                                 "start_unix_nano": tool_start, "end_unix_nano": tool_end,
@@ -378,7 +418,10 @@ class OpenCodeReader:
                         progress = self._plan_progress(db, tables, session_id, latest_trace,
                                                        latest_root_id, updated)
                         if progress:
-                            progress_logs.append(progress)
+                            revision = progress['attributes']['observatory.record_id']
+                            progress_revisions[session_id] = revision
+                            if self._progress_revisions.get(session_id) != revision:
+                                progress_logs.append(progress)
         except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
             self.errors += 1
             return 0
@@ -387,7 +430,9 @@ class OpenCodeReader:
             self.store.ingest(accepted)
         if progress_logs:
             self.store.ingest_logs(progress_logs)
+        # Publish only after successful ingestion, so a failure can be retried.
+        self._message_revisions = message_revisions
+        self._progress_revisions = progress_revisions
         self.fingerprint = fingerprint
         self.updated_ns = time.time_ns()
-        return len(accepted)
-
+        return len(accepted) + len(progress_logs)
