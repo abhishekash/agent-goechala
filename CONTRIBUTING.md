@@ -16,6 +16,14 @@ node --check clients/javascript/index.mjs
 
 Keep changes focused, document user-facing options, and avoid committing local databases, session captures, credentials, or real customer telemetry. Add or update tests for behavioral changes. CI runs the Python suite on Python 3.11–3.14 and checks the JavaScript module syntax on Node.js 22 and 24.
 
+## Contribution terms
+
+Agenturm is proprietary software. Unless you and the copyright holder agree
+otherwise in writing, by submitting a contribution you grant the copyright
+holder a perpetual, irrevocable, worldwide, royalty-free license to use,
+reproduce, modify, distribute, sublicense, and relicense your contribution,
+and you confirm that you have the right to grant those rights.
+
 ## Terminal preview
 
 The README walkthrough is reproducible and uses synthetic records only:

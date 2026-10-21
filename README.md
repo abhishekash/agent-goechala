@@ -13,7 +13,7 @@
   <a href="https://github.com/abhishekash/agenturm/actions/workflows/ci.yml"><img src="https://github.com/abhishekash/agenturm/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/interface-terminal-ffbd69?labelColor=191621" alt="Terminal interface">
   <img src="https://img.shields.io/badge/data-local-c5adff?labelColor=191621" alt="Data stays local">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-b9afc5?labelColor=191621" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-proprietary-b9afc5?labelColor=191621" alt="Proprietary license"></a>
 </p>
 
 <p align="center">
@@ -152,6 +152,7 @@ publication.
 
 ---
 
-**Agenturm** is open source under the [MIT license](LICENSE).
+**Agenturm** is proprietary software. All rights reserved. See the
+[license](LICENSE) for the terms that apply.
 The Berlin-inspired tower-and-lens mark and the terminal's Alpine Ember palette
 are included in the same repository.

@@ -40,7 +40,7 @@ Try it with `uvx --from git+https://github.com/abhishekash/agenturm agenturm`. I
 on a machine where you already use Codex or Claude Code. The README animation uses synthetic example data; your terminal view
 shows what your local records or telemetry actually contain.
 
-This is an early MIT-licensed project. I would like feedback on missing tool
+This is an early-stage project. I would like feedback on missing tool
 activity, confusing session states, and the effort needed to find a failed call.
 
 The [Show HN guidelines](https://news.ycombinator.com/showhn.html) call for a
@@ -66,7 +66,7 @@ OTLP/HTTP traces. Its demo uses a bundled scripted regression trace.
 Try: `uvx spanhound demo`
 https://github.com/abhishekash/spanhound
 
-Both are open source under MIT. I’m looking for people to try them on their own
+Agenturm is proprietary; SpanHound is open source under MIT. I’m looking for people to try them on their own
 agent workflows and tell me which debugging questions remain hard to answer.
 
 #OpenTelemetry #MCP #AIAgents #OpenSource

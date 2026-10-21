@@ -69,7 +69,7 @@ def build():
 <circle cx="1060" cy="170" r="230" fill="url(#dawn)"/>
 <path d="M1114 72V350M1154 98V350M1194 72V350M1082 130h144M1082 205h144M1082 280h144" fill="none" stroke="#67516d" stroke-width="2" opacity=".6"/>
 <path d="M64 55h30" stroke="{GOLD}" stroke-width="3"/>
-<text x="106" y="61" fill="{MUTED}" font-family="DejaVu Sans Mono,monospace" font-size="13" letter-spacing="3">LOCAL. TERMINAL. OPEN SOURCE.</text>
+<text x="106" y="61" fill="{MUTED}" font-family="DejaVu Sans Mono,monospace" font-size="13" letter-spacing="3">LOCAL. TERMINAL. PROPRIETARY.</text>
 <text x="58" y="181" fill="{WHITE}" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="84" letter-spacing="1">AGENTURM</text>
 <text x="64" y="282" fill="{WHITE}" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
 <text x="65" y="354" fill="{MUTED}" font-family="DejaVu Sans Mono,monospace" font-size="15">CODEX  /  CLAUDE CODE  /  OPENCODE</text>
