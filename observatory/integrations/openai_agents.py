@@ -13,7 +13,7 @@ try:
 except ImportError as exc:  # pragma: no cover - optional integration dependency
     raise ImportError(
         "OpenAIAgentsExporter requires the optional dependency: "
-        "pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'"
+        "pip install 'agenturm[openai-agents] @ git+https://github.com/abhishekash/agenturm'"
     ) from exc
 
 
@@ -179,7 +179,7 @@ def create_processor(client, *, capture_content=False, max_content_chars=4000,
     except ImportError as exc:  # pragma: no cover - optional integration dependency
         raise ImportError(
             "create_processor requires the optional dependency: "
-            "pip install 'agent-goechala[openai-agents] @ git+https://github.com/abhishekash/agent-goechala'"
+            "pip install 'agenturm[openai-agents] @ git+https://github.com/abhishekash/agenturm'"
         ) from exc
     exporter = OpenAIAgentsExporter(client, capture_content=capture_content,
                                     max_content_chars=max_content_chars)

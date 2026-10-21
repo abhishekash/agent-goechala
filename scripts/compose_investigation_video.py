@@ -45,7 +45,7 @@ def screen_frame(source, chapter, headline, supporting, keys, icon, progress=0):
     frame = Image.new('RGB', (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(frame)
     frame.paste(icon, (57, 22), icon)
-    draw.text((136, 27), 'AGENT GOECHALA', font=font(28, bold=True), fill=WHITE)
+    draw.text((136, 27), 'Agenturm', font=font(28, bold=True), fill=WHITE)
     draw.text((138, 65), 'A clear view of every agent.', font=font(16), fill=MUTED)
     draw.text((1450, 38), chapter, font=font(19, mono=True), fill=GOLD)
     draw.line((64, 106, 1856, 106), fill='#51475f', width=1)
@@ -69,9 +69,9 @@ def outro(icon):
     def centered(text,y,typeface,fill):
         width=draw.textlength(text,font=typeface)
         draw.text(((WIDTH-width)/2,y),text,font=typeface,fill=fill)
-    centered('Agent Goechala', 450, font(70,bold=True), WHITE)
+    centered('Agenturm', 450, font(70,bold=True), WHITE)
     centered('A clear view of every agent.', 553, font(34), CYAN)
-    centered('agent-goechala', 694, font(30,mono=True), GOLD)
+    centered('agenturm', 694, font(30,mono=True), GOLD)
     centered('Local agent observability. Right in your terminal.', 824, font(25), MUTED)
     return frame
 
@@ -89,7 +89,7 @@ def encode(captures, output, poster):
     screen_frame(images[first[0]],*first[2:],icon).save(poster,optimize=True)
     writer=write_frames(str(output),(WIDTH,HEIGHT),fps=FPS,codec='libx264',quality=7,
         pix_fmt_in='rgb24',pix_fmt_out='yuv420p',macro_block_size=8,
-        output_params=['-movflags','+faststart','-metadata','title=Agent Goechala — a clear view of every agent.'])
+        output_params=['-movflags','+faststart','-metadata','title=Agenturm — a clear view of every agent.'])
     writer.send(None)
     total=sum(scene[1] for scene in SCENES)+3
     elapsed=0

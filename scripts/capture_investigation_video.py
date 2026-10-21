@@ -1,6 +1,6 @@
 """Capture a synthetic MCP failure in the actual terminal UI as SVG frames.
 
-Run with the Python environment that has Agent Goechala installed:
+Run with the Python environment that has Agenturm installed:
     python scripts/capture_investigation_video.py --output /tmp/ao-capture
 No receiver, API key, network connection, or user session records are read.
 """
@@ -91,7 +91,7 @@ async def capture(output: Path):
         app.update_layout()
         async def save(name):
             await pilot.pause(0.6)
-            (output / f'{name}.svg').write_text(app.export_screenshot(title='Agent Goechala · synthetic demo'))
+            (output / f'{name}.svg').write_text(app.export_screenshot(title='Agenturm · synthetic demo'))
         await save('agents')
         app.selected_source = source_id
         await pilot.press('s')

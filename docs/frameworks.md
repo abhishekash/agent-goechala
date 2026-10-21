@@ -1,6 +1,6 @@
 # Connect agent frameworks
 
-Agent Goechala combines local session records with telemetry emitted by an
+Agenturm combines local session records with telemetry emitted by an
 agent runtime. The collection path determines what can be shown; it does not
 guess actions that the runtime never recorded.
 
@@ -10,7 +10,7 @@ guess actions that the runtime never recorded.
 |---|---|---|
 | Local session discovery | Codex CLI and Claude Code | Session/task state and the events present in their local records. Goechala does not attach to arbitrary processes. |
 | Local database discovery | OpenCode | Read-only recent session metadata, assistant-turn model/token spans, recorded tool parts, and progress from its persisted task checklist. Reasoning parts are excluded; task text and tool payloads follow the local content-capture setting. |
-| Python auto capture | OpenAI Python SDK, Anthropic Python SDK, and LangChain SDKs launched through `agent-goechala run` | OpenInference model and framework spans; content is omitted by default. |
+| Python auto capture | OpenAI Python SDK, Anthropic Python SDK, and LangChain SDKs launched through `agenturm run` | OpenInference model and framework spans; content is omitted by default. |
 | Python adapters | LangChain callback handler and OpenAI Agents SDK exporter | Framework spans, model usage when supplied, tool activity, errors, and optional progress/content according to each adapter. |
 | OTLP | Any language or agent able to export OTLP/HTTP traces, logs, or metrics | The fields the producer emits. GenAI semantic attributes are normalized into model, token, tool, MCP, and session details when present. |
 | Gemini CLI | Built-in OpenTelemetry export over OTLP/HTTP | Traces, logs, metrics, token usage, run lifecycle, file/tool activity, and MCP calls; session rows are grouped from `session.id` telemetry without wrapper code or private log scraping. |
@@ -43,14 +43,14 @@ connection shutdown. The test sends no model requests over the network.
 The default terminal cockpit starts its receiver on port `14318`:
 
 ```bash
-agent-goechala
+agenturm
 ```
 
 Alternatively, run the OTLP receiver directly. `serve` defaults
 to port `4318`:
 
 ```bash
-agent-goechala serve
+agenturm serve
 ```
 
 Use the port for the receiver you started. Keep it on loopback for local use.
@@ -167,7 +167,7 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_SERVICE_NAME=my-agent
 ```
 
-For a standalone `agent-goechala serve` using its default port, replace
+For a standalone `agenturm serve` using its default port, replace
 `14318` with `4318`. OTLP/HTTP uses `/v1/traces`, `/v1/logs`, and `/v1/metrics`;
 the general endpoint above lets standard exporters append those paths.
 

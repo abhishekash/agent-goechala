@@ -9,7 +9,7 @@ try:
 except ImportError as exc:  # pragma: no cover - depends on optional integration extra
     raise ImportError(
         "LangChainCallbackHandler requires the optional dependency: "
-        "pip install 'agent-goechala[langchain] @ git+https://github.com/abhishekash/agent-goechala'"
+        "pip install 'agenturm[langchain] @ git+https://github.com/abhishekash/agenturm'"
     ) from exc
 
 

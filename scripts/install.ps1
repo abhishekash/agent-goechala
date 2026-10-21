@@ -8,4 +8,4 @@ if (-not $Uv) {
 
 & $Uv.Source tool install --upgrade --force $RepoRoot
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Write-Host "Installed agent-goechala. Run: agent-goechala"
+Write-Host "Installed agenturm. Run: agenturm"

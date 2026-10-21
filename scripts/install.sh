@@ -10,4 +10,4 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 uv tool install --upgrade --force "$REPO_ROOT"
-printf '\n%s\n' 'Installed agent-goechala. Run: agent-goechala'
+printf '\n%s\n' 'Installed agenturm. Run: agenturm'

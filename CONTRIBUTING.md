@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Agent Goechala. For bugs and feature ideas, open a GitHub issue with the expected behavior and a minimal reproduction when possible.
+Thanks for helping improve Agenturm. For bugs and feature ideas, open a GitHub issue with the expected behavior and a minimal reproduction when possible.
 
 ## Local development
 
@@ -28,4 +28,4 @@ This writes the five-view GIF to `media/terminal-demo.gif` and optional wide/com
 
 ## Brand and demo assets
 
-The SVG mountain-pass identity, color palette, and raster exports are documented in [docs/branding.md](docs/branding.md). Reproduce the README video and keyboard-driven TUI captures with [docs/investigation-video.md](docs/investigation-video.md). Use only synthetic records for public media.
+The SVG tower identity, color palette, and raster exports are documented in [docs/branding.md](docs/branding.md). Reproduce the README video and keyboard-driven TUI captures with [docs/investigation-video.md](docs/investigation-video.md). Use only synthetic records for public media.

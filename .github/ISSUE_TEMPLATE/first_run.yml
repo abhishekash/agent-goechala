@@ -4,7 +4,7 @@ title: "First run: "
 body:
   - type: markdown
     attributes:
-      value: "Thanks for trying Agent Goechala. Share redacted excerpts; session logs can contain prompts and credentials."
+      value: "Thanks for trying Agenturm. Share redacted excerpts; session logs can contain prompts and credentials."
   - type: textarea
     id: goal
     attributes:

@@ -27,6 +27,7 @@ from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog,
 
 from .terminal import clean, number, trace_name
 from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead
+from .themes import PALETTES, supported_themes, themed_style, themed_text
 
 
 def cell(value, style=''):
@@ -249,10 +250,10 @@ def format_json(value):
     return json.dumps(prepare(value),ensure_ascii=False,indent=2),text_values
 
 
-def write_json(log,value):
+def write_json(log,value,theme='Current'):
     """Render indented JSON and move multiline string values into readable blocks."""
     formatted,text_values=format_json(value)
-    log.write(Syntax(formatted,'json',word_wrap=True,background_color='#191621'))
+    log.write(evidence_syntax(formatted,'json',theme))
     for path,content in text_values:
         log.write(Text(f'\n{path} · {len(content.splitlines())} lines',style='bold #c5adff'))
         log.write(Text(content))
@@ -546,8 +547,19 @@ class SearchInput(Input):
     BINDINGS=[Binding('ctrl+a','select_all','Select all',show=False)]
 
 
+def evidence_syntax(content, lexer, theme='Current'):
+    return Syntax(content, lexer, word_wrap=True,
+                  theme='friendly' if theme == 'Bright' else 'monokai',
+                  background_color=PALETTES[theme]['surface'])
+
+
 class SelectableRichLog(RichLog):
     """Selectable evidence with visible highlighting and plain-text extraction."""
+    def write(self, content, *args, **kwargs):
+        if isinstance(content, Text):
+            content = themed_text(self, content)
+        return super().write(content, *args, **kwargs)
+
     def render_line(self,y):
         source_y=self.scroll_offset.y+y
         width=self.scrollable_content_region.width
@@ -611,71 +623,71 @@ class ObservatoryApp(App):
     TITLE=NAME
     AUTO_FOCUS='#agent-table'
     CSS='''
-    Screen { background: #121018; color: #f6f0e8; }
-    Screen > .screen--selection { background: #5c4578; color: #ffffff; }
-    * { scrollbar-color: #675975; scrollbar-color-hover: #c5adff; scrollbar-color-active: #ffbd69; scrollbar-background: #191621; scrollbar-background-hover: #191621; scrollbar-background-active: #191621; }
-    #masthead { height: 4; padding: 0 2; align-vertical: middle; background: #242030; border-bottom: solid #51475f; }
-    #brand { width: 1fr; height: 2; color: #f6f0e8; text-wrap: nowrap; }
-    #connection { width: auto; color: #86e3b5; text-align: right; text-wrap: nowrap; }
+    Screen { background: $agent-canvas; color: $agent-text; }
+    Screen > .screen--selection { background: $agent-selection; color: $agent-on-selection; }
+    * { scrollbar-color: $agent-scrollbar; scrollbar-color-hover: $agent-secondary; scrollbar-color-active: $agent-primary; scrollbar-background: $agent-surface; scrollbar-background-hover: $agent-surface; scrollbar-background-active: $agent-surface; }
+    #masthead { height: 3; padding: 0 2; align-vertical: middle; background: $agent-panel; border-bottom: solid $agent-border; }
+    #brand { width: 1fr; height: 1; color: $agent-text; text-wrap: nowrap; }
+    #connection { width: auto; color: $agent-success; text-align: right; text-wrap: nowrap; }
     #summary { height: 3; margin: 1 2 0 2; }
-    .stat { width: 1fr; border-left: solid #463d52; background: #191621; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
-    #stat-sessions { border-left: solid #ffbd69; }
-    #stat-processes { border-left: solid #86e3b5; }
-    #stat-mcp-count { border-left: solid #c5adff; }
-    #stat-usage { border-left: solid #86d9ed; }
+    .stat { width: 1fr; border-left: solid $agent-border-subtle; background: $agent-surface; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
+    #stat-sessions { border-left: solid $agent-primary; }
+    #stat-processes { border-left: solid $agent-success; }
+    #stat-mcp-count { border-left: solid $agent-secondary; }
+    #stat-usage { border-left: solid $agent-info; }
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
-    #scope-label { width: 7; height: 1; margin-top: 1; color: #b9afc5; }
+    #scope-label { width: 7; height: 1; margin-top: 1; color: $agent-muted; }
     #scope { width: 37; margin-right: 1; }
-    SelectCurrent { background: #242030; border: tall #51475f; }
-    Select:focus > SelectCurrent { border: tall #ffbd69; background-tint: transparent; }
-    SelectOverlay { background: #242030; border: tall #ffbd69; }
+    SelectCurrent { background: $agent-panel; border: tall $agent-border; }
+    Select:focus > SelectCurrent { border: tall $agent-primary; background-tint: transparent; }
+    SelectOverlay { background: $agent-panel; border: tall $agent-primary; }
     #controls-spacer { width: 1fr; }
-    #reviews { width: 14; border: none; background: #121018; margin-top: 1; color: #b9afc5; }
-    Checkbox > .toggle--button { color: #8f849d; background: #242030; }
-    Checkbox.-on > .toggle--button { color: #ffbd69; }
-    Button { height: 3; min-width: 9; padding: 1 0 0 0; background: #242030; color: #e1d9eb; border: none; border-bottom: solid #51475f; text-style: none; }
-    Button:hover { background: #3a2c49; border-bottom: solid #c5adff; }
-    Button:focus { border-bottom: heavy #ffbd69; background: #493622; color: #ffbd69; text-style: bold; }
-    Button:disabled { color: #8f849d; border-bottom: solid #393041; background: #191621; }
+    #reviews { width: 14; border: none; background: $agent-canvas; margin-top: 1; color: $agent-muted; }
+    Checkbox > .toggle--button { color: $agent-disabled; background: $agent-panel; }
+    Checkbox.-on > .toggle--button { color: $agent-primary; }
+    Button { height: 3; min-width: 9; padding: 1 0 0 0; background: $agent-panel; color: $agent-label; border: none; border-bottom: solid $agent-border; text-style: none; }
+    Button:hover { background: $agent-hover; border-bottom: solid $agent-secondary; }
+    Button:focus { border-bottom: heavy $agent-primary; background: $agent-focus; color: $agent-primary; text-style: bold; }
+    Button:disabled { color: $agent-disabled; border-bottom: solid $agent-border-disabled; background: $agent-surface; }
     #pause { width: 12; }
     #pages { height: 1fr; margin: 0 2; }
     Tabs { height: 2; padding-top: 0; margin-top: 1; }
-    Tab { color: #b9afc5; padding: 0 2; background: #191621; }
-    Tab.-active { color: #21182a; background: #ffbd69; text-style: bold; }
-    Tabs:focus .-active { background: #ffdb9f; color: #21182a; text-style: bold underline; }
-    Underline > .underline--bar { color: #ffbd69; background: #51475f; }
+    Tab { color: $agent-muted; padding: 0 2; background: $agent-surface; }
+    Tab.-active { color: $agent-on-primary; background: $agent-primary; text-style: bold; }
+    Tabs:focus .-active { background: $agent-primary-focus; color: $agent-on-primary; text-style: bold underline; }
+    Underline > .underline--bar { color: $agent-primary; background: $agent-border; }
     TabPane { padding: 0; }
     ContentSwitcher { height: 1fr; }
-    .hint { height: 2; color: #b9afc5; }
-    .box { border: round #463d52; border-title-color: #e1d9eb; border-title-style: bold; background: #191621; padding: 0 1; }
-    .box:focus-within { border: round #ffbd69; border-title-color: #ffbd69; }
+    .hint { height: 2; color: $agent-muted; }
+    .box { border: round $agent-border-subtle; border-title-color: $agent-label; border-title-style: bold; background: $agent-surface; padding: 0 1; }
+    .box:focus-within { border: round $agent-primary; border-title-color: $agent-primary; }
     .results { height: 1fr; }
     .searchbar { height: 3; align-vertical: middle; }
-    .view-search { width: 1fr; margin-right: 1; padding: 0 1; background: #242030; border: tall #51475f; }
-    .view-search:focus { border: tall #ffbd69; background-tint: transparent; }
-    Input > .input--placeholder { color: #b9afc5; }
-    Input > .input--cursor { background: #ffbd69; color: #121018; }
-    Input > .input--selection { background: #5c4578; color: #ffffff; }
+    .view-search { width: 1fr; margin-right: 1; padding: 0 1; background: $agent-panel; border: tall $agent-border; }
+    .view-search:focus { border: tall $agent-primary; background-tint: transparent; }
+    Input > .input--placeholder { color: $agent-muted; }
+    Input > .input--cursor { background: $agent-primary; color: $agent-canvas; }
+    Input > .input--selection { background: $agent-selection; color: $agent-on-selection; }
     .clear-search { width: 9; }
     .error-filter { width: 12; margin-right: 1; }
-    .error-filter.-on { color: #ff8799; border-bottom: heavy #ff8799; background: #422330; text-style: bold; }
+    .error-filter.-on { color: $agent-error; border-bottom: heavy $agent-error; background: $agent-error-surface; text-style: bold; }
     .prompt-filter { width: 12; margin-right: 1; }
-    .prompt-filter.-on { color: #ffbd69; border-bottom: heavy #ffbd69; background: #493622; text-style: bold; }
-    .search-status { height: 1; color: #b9afc5; padding: 0 1; }
+    .prompt-filter.-on { color: $agent-primary; border-bottom: heavy $agent-primary; background: $agent-focus; text-style: bold; }
+    .search-status { height: 1; color: $agent-muted; padding: 0 1; }
     .history-controls { height: 1; margin-top: 1; }
-    .history-controls Static { width: 1fr; color: #b9afc5; }
+    .history-controls Static { width: 1fr; color: $agent-muted; }
     .history-controls Button { min-width: 8; width: auto; height: 1; padding: 0 1; margin-left: 1; border: none; }
-    .history-controls Button:focus { background: #443555; color: #ffffff; }
+    .history-controls Button:focus { background: $agent-cursor; color: $agent-on-selection; }
     #history-back { width: 10; margin-right: 1; }
-    DataTable { background: #191621; height: 1fr; scrollbar-size: 1 1; }
+    DataTable { background: $agent-surface; height: 1fr; scrollbar-size: 1 1; }
     DataTable:focus { background-tint: transparent; }
-    DataTable > .datatable--header { background: #30283e; color: #c5adff; text-style: bold; }
-    DataTable > .datatable--cursor { background: #443555; color: #fff7eb; text-style: bold; }
-    DataTable:blur > .datatable--cursor { background: #30283e; color: #f6f0e8; text-style: none; }
-    DataTable > .datatable--hover { background: #352b43; }
-    DataTable > .datatable--odd-row { background: #211b2b; }
-    DataTable > .datatable--even-row { background: #191621; }
-    RichLog { background: #191621; color: #f6f0e8; scrollbar-size: 1 1; }
+    DataTable > .datatable--header { background: $agent-header; color: $agent-secondary; text-style: bold; }
+    DataTable > .datatable--cursor { background: $agent-cursor; color: $agent-on-cursor; text-style: bold; }
+    DataTable:blur > .datatable--cursor { background: $agent-header; color: $agent-text; text-style: none; }
+    DataTable > .datatable--hover { background: $agent-row-hover; }
+    DataTable > .datatable--odd-row { background: $agent-row-alt; }
+    DataTable > .datatable--even-row { background: $agent-surface; }
+    RichLog { background: $agent-surface; color: $agent-text; scrollbar-size: 1 1; }
     RichLog:focus { background-tint: transparent; }
     #mcp-servers { height: 7; margin-bottom: 1; }
     .expanded #mcp-servers { display: none; }
@@ -689,20 +701,20 @@ class ObservatoryApp(App):
     .list { width: 3fr; margin-right: 1; }
     .detail { width: 2fr; }
     .detail-log { height: 1fr; }
-    #usage-series { height: 12; min-height: 6; padding: 0 1; color: #c5adff; }
+    #usage-series { height: 12; min-height: 6; padding: 0 1; color: $agent-secondary; }
     .detail-button { height: 3; width: 100%; }
     .inspector-actions { height: 3; }
     .inspector-actions Button { width: 1fr; }
     .expand-button { min-width: 12; }
     #trace-detail { width: 2fr; }
-    #span-tree { height: 1fr; min-height: 4; background: #191621; scrollbar-size: 1 1; }
-    #span-info { height: 10; border-top: solid #463d52; }
-    #health { height: 1; padding: 0 2; color: #b9afc5; }
-    Footer { background: #242030; color: #b9afc5; }
-    FooterKey { background: #3b2d4c; color: #ffbd69; }
-    FooterKey > .footer-key--key { background: #ffbd69; color: #21182a; text-style: bold; }
-    FooterKey > .footer-key--description { background: #242030; color: #e1d9eb; }
-    FooterLabel { background: #242030; color: #e1d9eb; }
+    #span-tree { height: 1fr; min-height: 4; background: $agent-surface; scrollbar-size: 1 1; }
+    #span-info { height: 10; border-top: solid $agent-border-subtle; }
+    #health { height: 1; padding: 0 2; color: $agent-muted; }
+    Footer { background: $agent-panel; color: $agent-muted; }
+    FooterKey { background: $agent-footer-key; color: $agent-primary; }
+    FooterKey > .footer-key--key { background: $agent-primary; color: $agent-on-primary; text-style: bold; }
+    FooterKey > .footer-key--description { background: $agent-panel; color: $agent-label; }
+    FooterLabel { background: $agent-panel; color: $agent-label; }
     .narrow #masthead { padding: 0 1; }
     .narrow #summary { margin: 0 1; }
     .narrow .stat { padding: 0 1; }
@@ -741,6 +753,11 @@ class ObservatoryApp(App):
 
     def __init__(self,feed):
         super().__init__()
+        for name in list(self.available_themes):
+            self.unregister_theme(name)
+        for theme in supported_themes():
+            self.register_theme(theme)
+        self.theme = 'Current'
         self.feed=feed
         self.agent=None
         self.data=feed.snapshot
@@ -874,6 +891,7 @@ class ObservatoryApp(App):
         return ObservatoryScreen()
 
     def on_mount(self):
+        self.theme_changed_signal.subscribe(self, self.on_theme_changed)
         columns={
             'agent-table':[('Agent',11,0),('Session ID',12,1),('Repo / project',14,2),('Status',12,0),('Updated',8,0),('Waiting on',16,2),('Task / details',22,4)],
             'agent-actions':[('Time',8,0),('Type',7,0),('Recent actions',15,1)],
@@ -905,6 +923,13 @@ class ObservatoryApp(App):
         if self.refresh_timer:self.refresh_timer.stop()
         for timer in self.search_timers.values():timer.stop()
 
+    def on_theme_changed(self, theme):
+        # RichLog stores rendered strips; cached rows/inspectors must be rebuilt too.
+        self.table_signatures.clear()
+        self.span_signature=None
+        self.update_layout()
+        self.reflow_inspectors()
+
     def on_resize(self,event):
         self.update_layout(event.size)
         self.call_after_refresh(self.reflow_inspectors)
@@ -928,14 +953,14 @@ class ObservatoryApp(App):
         self.screen.set_class(size.width<140,'narrow')
         self.screen.set_class(size.height<36,'compact')
         for brand in self.query('#brand'):
-            brand.update(masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36))
+            brand.update(themed_text(brand,masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36)))
 
     def stat(self,name,value,label,detail):
         accent={'sessions':AMBER,'processes':MINT,'mcp-count':LAVENDER,'usage':ICE}[name]
         text=Text(label.upper()+'\n',style='#e1d9eb',no_wrap=True,overflow='ellipsis')
         text.append(str(value),style='bold '+accent)
         text.append('\n'+detail,style='#b9afc5')
-        self.query_one('#stat-'+name,Static).update(text)
+        self.query_one('#stat-'+name,Static).update(themed_text(self.query_one('#stat-'+name),text))
 
     def fill(self,name,rows,preserve=None):
         """Preserve row identity and scroll position while live values change."""
@@ -944,6 +969,8 @@ class ObservatoryApp(App):
         if self.table_signatures.get(name)==signature:return
         self.table_signatures[name]=signature
         table=self.query_one('#'+name,DataTable)
+        rows=[(key,[themed_text(table,value) if isinstance(value,Text) else value for value in values],record)
+              for key,values,record in rows]
         selected=preserve
         if table.row_count:
             try:
@@ -985,14 +1012,16 @@ class ObservatoryApp(App):
         data=self.feed.snapshot
         connection='Ⅱ Paused' if self.feed.paused else '○ Reconnecting' if data.error else '● Connected'
         endpoint=self.feed.api.endpoint.removeprefix('http://').removeprefix('https://')
-        self.query_one('#connection',Static).update(Text(connection+'  '+endpoint,
-            style='#ffbd69' if self.feed.paused else '#ff8799' if data.error else '#86e3b5'))
+        connection_widget=self.query_one('#connection',Static)
+        connection_widget.update(themed_text(connection_widget,Text(connection+'  '+endpoint,
+            style='#ffbd69' if self.feed.paused else '#ff8799' if data.error else '#86e3b5')))
         health_text=(data.error if data.error else
             f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}")
         coverage=coverage_warning(data.local_status)
         if coverage:health_text+='  ·  '+coverage
         health=Text(health_text,style='#ffbd69' if coverage and not data.error else '#ff8799' if data.error else '#b9afc5')
-        self.query_one('#health',Static).update(health)
+        health_widget=self.query_one('#health',Static)
+        health_widget.update(themed_text(health_widget,health))
         if self.screen.selections:
             self.query_one('#health',Static).update('Text selected · Ctrl+C to copy · click to clear selection and resume display updates')
             return
@@ -1258,7 +1287,7 @@ class ObservatoryApp(App):
         log=self.query_one('#'+name,RichLog)
         scroll=log.scroll_offset
         log.clear();log.write(Text(title,style='bold #f6f0e8'))
-        table=Table.grid(padding=(0,2));table.add_column(style='#b9afc5',no_wrap=True);table.add_column()
+        table=Table.grid(padding=(0,2));table.add_column(style=themed_style(log,'#b9afc5'),no_wrap=True);table.add_column()
         for label,value in fields:table.add_row(Text(label),Text(str('Not reported' if value is None or value=='' else value)))
         log.write(table)
         for label,value in sections:self.write_evidence(log,label,value)
@@ -1276,7 +1305,7 @@ class ObservatoryApp(App):
                     if kind=='text':
                         if content.strip():log.write(Text(content.strip('\n')))
                     else:
-                        write_json(log,content)
+                        write_json(log,content,self.theme)
                 return
         # Native log adapters may wrap each piece of the same record in a
         # one-key `recorded_content` envelope. Unwrap that without consuming
@@ -1290,7 +1319,7 @@ class ObservatoryApp(App):
         if depth==0 and isinstance(value,(dict,list)) and value:
             log.write(Text('\n'+label.upper(),style='bold #ffbd69'))
             if label.lower()=='arguments':
-                write_json(log,value)
+                write_json(log,value,self.theme)
                 return
         if isinstance(value,(dict,list)) and not value:
             log.write(Text('\n'+label.title(),style='bold #c5adff'))
@@ -1302,7 +1331,7 @@ class ObservatoryApp(App):
         # as JSON than as a sequence of flattened label/value rows. This also
         # handles JSON strings stored under fields such as `output` or `text`.
         if depth and isinstance(value,(dict,list)):
-            write_json(log,value)
+            write_json(log,value,self.theme)
             return
         if depth<64 and isinstance(value,dict):
             for key,child in value.items():
@@ -1313,7 +1342,7 @@ class ObservatoryApp(App):
             return
         if isinstance(value,(dict,list)):
             log.write(Text('\n'+label.title(),style='bold #c5adff'))
-            write_json(log,value)
+            write_json(log,value,self.theme)
             return
         log.write(Text('\n'+label.title(),style='bold #c5adff'))
         if label.lower()=='command':
@@ -1322,12 +1351,12 @@ class ObservatoryApp(App):
             if script:
                 language,title,body=script
                 log.write(Text(title,style='bold #c5adff'))
-                log.write(Syntax(body or '# Empty script',language,word_wrap=True,background_color='#191621'))
+                log.write(evidence_syntax(body or '# Empty script',language,self.theme))
                 return
-            log.write(Syntax(command,'bash',word_wrap=True,background_color='#191621'))
+            log.write(evidence_syntax(command,'bash',self.theme))
         elif label.lower() in {'diff','patch','unified diff','code'}:
             lexer='diff' if 'diff' in label.lower() or label.lower()=='patch' else 'python' if label.lower()=='code' else 'bash'
-            log.write(Syntax(str(value),lexer,word_wrap=True,background_color='#191621'))
+            log.write(evidence_syntax(str(value),lexer,self.theme))
         else:log.write(Text(str(value)))
 
     def show_agent(self):
@@ -1478,7 +1507,7 @@ class ObservatoryApp(App):
                 duration=None if attrs.get('observatory.duration_unknown') else (item['end_unix_nano']-item['start_unix_nano'])/1e6
                 label=Text(f"{kind:5} ",style='#c5adff');label.append(clean(item['name']));label.append(' · '+timing(duration),style='#b9afc5')
                 if item['status']=='ERROR':label.append(' · ERROR',style='bold red')
-                nodes[item['span_id']]=(nodes.get(parent) or tree.root).add(label,data=item,expand=True)
+                nodes[item['span_id']]=(nodes.get(parent) or tree.root).add(themed_text(tree,label),data=item,expand=True)
             if not remaining:break
             if len(remaining)==len(pending):
                 for item in remaining:nodes[item['span_id']]=tree.root.add(Text(item['name']),data=item)

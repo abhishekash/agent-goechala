@@ -1,14 +1,14 @@
-# Agent Goechala launch kit
+# Agenturm launch kit
 
 ## Product and first use
 
-**Agent Goechala:** a local terminal monitor for AI agent activity.
+**Agenturm:** a local terminal monitor for AI agent activity.
 It discovers local Codex and Claude Code session records and receives OTLP traces,
 logs, and metrics from instrumented agents. It shows sessions, tasks, MCP calls,
 recorded tool inputs/results, tokens, errors, and host processes.
 
 ```bash
-uvx --from git+https://github.com/abhishekash/agent-goechala agent-goechala
+uvx --from git+https://github.com/abhishekash/agenturm agenturm
 ```
 
 Requires uv and Python 3.11+. A machine with no supported session records needs
@@ -16,27 +16,27 @@ a Codex/Claude Code task or telemetry from an instrumented agent before it can
 show activity. The README GIF uses synthetic records. Available details depend
 on the producer's logs and instrumentation.
 
-- [Repository and first-minute guide](https://github.com/abhishekash/agent-goechala)
-- [Direct demo GIF](https://raw.githubusercontent.com/abhishekash/agent-goechala/main/media/goechala-demo-preview.gif)
-- [PyPI](https://pypi.org/project/agent-goechala/)
-- [First-run feedback](https://github.com/abhishekash/agent-goechala/issues/new?template=first_run.yml)
+- [Repository and first-minute guide](https://github.com/abhishekash/agenturm)
+- [Direct demo GIF](https://raw.githubusercontent.com/abhishekash/agenturm/main/media/goechala-demo-preview.gif)
+- [PyPI](https://pypi.org/project/agenturm/)
+- [First-run feedback](https://github.com/abhishekash/agenturm/issues/new?template=first_run.yml)
 - [SpanHound: MCP trace investigation](https://github.com/abhishekash/spanhound)
 
 ## Show HN draft — not submitted
 
-**Title:** Show HN: Agent Goechala – watch local coding agents in your terminal
+**Title:** Show HN: Agenturm – watch local coding agents in your terminal
 
-**URL:** https://github.com/abhishekash/agent-goechala
+**URL:** https://github.com/abhishekash/agenturm
 
 **First comment:**
 
-I built Agent Goechala to see what my coding agents are doing across sessions:
+I built Agenturm to see what my coding agents are doing across sessions:
 the current task, shell commands, MCP calls, tool results, tokens, and errors.
 It reads local Codex and Claude Code session records as they change and also
 accepts OpenTelemetry from instrumented agents. The data is stored in local
 SQLite, with a keyboard-first terminal interface. A small HTTP receiver accepts telemetry locally.
 
-Try it with `uvx --from git+https://github.com/abhishekash/agent-goechala agent-goechala`. It works best
+Try it with `uvx --from git+https://github.com/abhishekash/agenturm agenturm`. It works best
 on a machine where you already use Codex or Claude Code. The README animation uses synthetic example data; your terminal view
 shows what your local records or telemetry actually contain.
 
@@ -51,12 +51,12 @@ project, be available for questions, and do not solicit votes.
 
 I’ve made two tools for local AI agent observability available:
 
-Agent Goechala shows what coding agents are doing in a terminal: sessions, tasks, MCP calls, recorded tool results, tokens, and errors.
+Agenturm shows what coding agents are doing in a terminal: sessions, tasks, MCP calls, recorded tool results, tokens, and errors.
 It discovers Codex and Claude Code session records and accepts OpenTelemetry
 from instrumented agents.
 
-Try: `uvx --from git+https://github.com/abhishekash/agent-goechala agent-goechala`
-https://github.com/abhishekash/agent-goechala
+Try: `uvx --from git+https://github.com/abhishekash/agenturm agenturm`
+https://github.com/abhishekash/agenturm
 
 SpanHound (formerly MCP Trace Inspector) lets an MCP client investigate local
 trace files: failed tools, recorded approvals, token usage, and differences
@@ -92,7 +92,7 @@ The GitHub traffic API returned the following totals for its last 14 days:
 
 | Project | Unique visitors | Clones / unique cloners | Stars |
 |---|---:|---:|---:|
-| Agent Goechala | 0 | 84 / 2 | 0 |
+| Agenturm | 0 | 84 / 2 | 0 |
 | SpanHound | 37 | 1006 / 368 | 0 |
 
 These counts include our own activity and potential bots. The Goechala

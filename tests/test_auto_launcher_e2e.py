@@ -81,7 +81,7 @@ class AutoLauncherEndToEndTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Finished. Run agent-goechala", result.stdout)
+        self.assertIn("Finished. Run agenturm", result.stdout)
         self.assertIn("listening to automatic-capture-e2e", result.stderr)
 
         traces = self.store.traces(service=service)
