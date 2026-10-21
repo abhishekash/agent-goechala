@@ -1,6 +1,7 @@
 # Agenturm walkthrough
 
-[Open the current terminal overview](../media/agenturm-terminal.png),
+[Watch the README animation](../media/agenturm-demo.gif),
+[open the current terminal overview](../media/agenturm-terminal.png),
 [inspect the failed MCP call](../media/screenshots/mcp-detail.png), or
 [see the compact layout](../media/screenshots/compact.png).
 
@@ -34,15 +35,19 @@ uv run --with cairosvg python scripts/capture_investigation_video.py \
   --screenshots media/screenshots --readme-image media/agenturm-terminal.png
 ```
 
-Optionally render the same sequence as a 29-second video and animated preview:
+Optionally render the same sequence as a 29-second video and a high-resolution
+README animation:
 
 ```bash
 uv run --with cairosvg --with pillow --with imageio-ffmpeg \
   python scripts/compose_investigation_video.py \
   --captures /tmp/opencode/agenturm-capture --output /tmp/opencode/agenturm-demo.mp4
 uv run --with imageio-ffmpeg python scripts/make_readme_preview.py \
-  --video /tmp/opencode/agenturm-demo.mp4 --output /tmp/opencode/agenturm-demo-preview.gif
+  --video /tmp/opencode/agenturm-demo.mp4 --output media/agenturm-demo.gif
 ```
+
+The preview defaults to 1920 × 1080 at 12 fps with a 256-colour palette. Use
+`--width` or `--fps` to trade resolution for file size.
 
 The capture script drives the actual TUI through its keyboard actions and
 Prompts button, and also captures an 80 × 24 terminal. The composer streams

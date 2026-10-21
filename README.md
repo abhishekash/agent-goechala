@@ -23,7 +23,7 @@
 ## See the work
 
 <p align="center">
-  <img src="media/agenturm-terminal.png" alt="Agenturm terminal with its purple tower-and-lens mark, agent sessions, tasks, and recorded progress." width="100%">
+  <img src="media/agenturm-demo.gif" alt="Animated Agenturm terminal walkthrough showing agent sessions, user prompts, a failed MCP call, and its linked trace." width="100%">
 </p>
 
 <p align="center">
