@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/brand/icon.svg" alt="Agenturm tower icon" width="72" height="72">
+  <img src="media/brand/icon.svg" alt="Agenturm: a Berlin-inspired tower with a purple observation sphere and magnifying glass" width="72" height="72">
 </p>
 
 <h1 align="center">Agenturm</h1>
@@ -23,7 +23,7 @@
 ## See the work
 
 <p align="center">
-  <img src="media/agenturm-terminal.png" alt="Agenturm terminal showing agent sessions and recorded progress, with a compact tower icon and visible product name." width="100%">
+  <img src="media/agenturm-terminal.png" alt="Agenturm terminal with its purple tower-and-lens mark, agent sessions, tasks, and recorded progress." width="100%">
 </p>
 
 <p align="center">
@@ -91,7 +91,8 @@ pretending it can approve on the agent's behalf.
 
 Press **Ctrl+P**, choose **Theme**, then select **Current** (Alpine Ember),
 **Bright**, **Dark**, or **Solarized**. Each palette applies to the panels,
-tables, controls, and evidence inspectors; Current is the default.
+tables, controls, and evidence inspectors; Current is the default. The tower-and-lens
+mark adapts to each theme, including light backgrounds.
 
 In **Activity**, use **Prompts** to read the prompt sequence for the selected
 agent. Search, session scope, and selection help keep other sessions out of the
@@ -151,4 +152,5 @@ publication.
 ---
 
 **Agenturm** is open source under the [MIT license](LICENSE).
-The tower mark and the terminal's Alpine Ember palette are included in the same repository.
+The Berlin-inspired tower-and-lens mark and the terminal's Alpine Ember palette
+are included in the same repository.

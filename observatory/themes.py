@@ -1,4 +1,6 @@
 """Four supported terminal palettes; Current preserves the Alpine Ember identity."""
+import re
+
 from rich.text import Span
 from textual.theme import Theme
 
@@ -70,9 +72,10 @@ def supported_themes():
 def themed_style(widget, style):
     """Translate the original Rich styles, including cached table/evidence colors."""
     colors = PALETTES.get(widget.app.theme, CURRENT)
-    for role, original in CURRENT.items():
-        style = style.replace(original, colors[role])
-    return style
+    replacements = {original: colors[role] for role, original in CURRENT.items()}
+    # Translate once: Bright's white canvas must not be remapped as selection text.
+    return re.sub(r'#[0-9a-fA-F]{6}\b',
+                  lambda match: replacements.get(match.group().lower(), match.group()), style)
 
 
 def themed_text(widget, text):

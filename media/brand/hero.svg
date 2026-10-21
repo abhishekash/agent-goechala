@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
 <title id="title">Agenturm — a clear view of every agent</title>
-<desc id="desc">A geometric amber tower with three battlements and a single observation window.</desc>
+<desc id="desc">A Berlin TV Tower-inspired broadcast tower with a lavender-purple spherical deck, a central magnifying glass, one thin observation band, a slender amber mast, and a banded antenna.</desc>
 
 <defs>
   <linearGradient id="sky" x2="1" y2="1"><stop stop-color="#30223d"/><stop offset="1" stop-color="#121018"/></linearGradient>
@@ -16,8 +16,18 @@
 <text x="65" y="354" fill="#b9afc5" font-family="DejaVu Sans Mono,monospace" font-size="15">CODEX  /  CLAUDE CODE  /  OPENCODE</text>
 <g transform="translate(913 50) scale(.65)">
 
-  <path d="M144 112h48v48h40v-48h48v48h40v-48h48v112h-40l16 144h24v40H144v-40h24l16-144h-40Z
-           M240 264v56h32v-56a16 16 0 0 0-32 0Z" fill="#ffbd69" fill-rule="evenodd"/>
+  <!-- Berlin's distinctive proportions: antenna, spherical deck, slim mast. -->
+  <path d="M252 62h8v28h-8Z M248 110h16v34h-16Z" fill="#ffbd69"/>
+  <path d="M250 90h12v20h-12Z" fill="#f6f0e8"/>
+  <path d="M249 258h14l12 168h-38Z M218 426h76v10h-76Z" fill="#ffbd69"/>
+  <!-- A circular deck split by one thin band below the central hand lens. -->
+  <!-- The band and lens are true cutouts, not painted background rectangles. -->
+  <path fill="#c5adff" fill-rule="evenodd" d="
+    M201.741 232a62 62 0 1 1 108.518 0Z
+    M205.522 238h100.956a62 62 0 0 1-100.956 0Z
+    M266.41 206.75l14.42 14.42-5.66 5.66-14.42-14.42a21 21 0 1 1 5.66-5.66Z
+    M262 195a13 13 0 1 0-26 0 13 13 0 1 0 26 0Z
+  "/>
 </g>
 <rect x=".5" y=".5" width="1279" height="419" rx="28" fill="none" stroke="#51475f"/>
 

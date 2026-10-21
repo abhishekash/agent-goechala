@@ -2,9 +2,15 @@
 
 **A clear view of every agent.**
 
-The logo is a geometric watchtower: three battlements, a single observation
-window, and a solid amber silhouette. It represents a clear vantage point over
-agent activity, not control of the agents. The wordmark is simply **Agenturm**.
+The logo takes its primary reference from Berlin's TV Tower: a spherical
+observation deck on a slender mast, topped with a banded broadcast antenna.
+The lavender-purple sphere contains a central hand lens (magnifying glass),
+with a single thin observation band below it. Both details are transparent
+cutouts. The amber mast rests on a flat foundation. The sphere is circular, not a flattened
+saucer, and the shaft has no doorway or decorative cutouts. Strict symmetry
+and restrained geometry express confidence, strength, and rigour. The mark
+represents a clear vantage point over agent activity, not control of the agents.
+The wordmark is simply **Agenturm**.
 
 ## Assets
 
@@ -28,7 +34,7 @@ space around it. At small sizes, use the mark without a wordmark.
 | Night | `#191621` | Panels |
 | Violet grey | `#242030` | Raised surfaces and controls |
 | Amber | `#ffbd69` | Active navigation, keyboard focus, current work |
-| Lavender | `#c5adff` | Detail headings and tool inventory |
+| Lavender | `#c5adff` | Tower sphere, detail headings, and tool inventory |
 | Mint | `#86e3b5` | Successful calls and healthy activity |
 | Ice | `#86d9ed` | Usage values |
 | Frost | `#f6f0e8` | Primary text |
@@ -37,9 +43,15 @@ space around it. At small sizes, use the mark without a wordmark.
 
 Use color to support text, never as the sole status indicator. Focus remains
 visible through borders and selected rows. The identity is static: no flashing
-logo or decorative loading animation. The terminal uses the standard monochrome
-Unicode tower `♜` followed by **Agenturm**, always on one line. No multi-line
-ASCII art, image protocols, emoji rendering, or Nerd Font is required.
+logo or decorative loading animation. The terminal uses a five-column, five-row
+block-and-line tower in its own bounded widget beside the single-line **Agenturm** wordmark.
+Short terminals use a one-line mark. No image protocols, emoji rendering, or Nerd
+Font is required. Below 100 columns, summary cards form two rows; longer explanations
+live in tooltips rather than running off the edge of a card.
+The terminal mark has no background tile: it uses the active terminal canvas.
+Its sphere follows the theme's purple/secondary color (a darker purple in Bright), while
+the mast follows the primary accent. Both meet at least 4.5:1 contrast against
+the canvas in every supported theme.
 
 ## Terminal themes
 

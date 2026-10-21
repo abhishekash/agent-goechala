@@ -81,17 +81,31 @@ def prepare_failure():
     snapshot.sessions[0].update({"input_tokens": 1840, "output_tokens": 326})
 
 
-async def capture(output: Path):
+async def capture(output: Path, screenshots: Path | None = None, readme_image: Path | None = None):
     output.mkdir(parents=True, exist_ok=True)
+    if screenshots or readme_image:
+        import cairosvg
+    if screenshots:
+        screenshots.mkdir(parents=True, exist_ok=True)
+    if readme_image:
+        readme_image.parent.mkdir(parents=True, exist_ok=True)
     prepare_failure()
     app = ObservatoryApp(FakeFeed())
     app.demo_mode = True
-    async with app.run_test(size=(148, 42)) as pilot:
+    async with app.run_test(size=(148, 46)) as pilot:
         await pilot.pause(0.5)
         app.update_layout()
         async def save(name):
             await pilot.pause(0.6)
-            (output / f'{name}.svg').write_text(app.export_screenshot(title='Agenturm · synthetic demo'))
+            svg = app.export_screenshot(title='Agenturm · synthetic demo')
+            (output / f'{name}.svg').write_text(svg)
+            if screenshots or (readme_image and name == 'agents'):
+                svg = svg.replace('Fira Code', 'DejaVu Sans Mono').replace('FiraCode', 'DejaVu Sans Mono')
+                png = cairosvg.svg2png(bytestring=svg.encode(), output_width=1920)
+                if screenshots:
+                    (screenshots / f'{name}.png').write_bytes(png)
+                if readme_image and name == 'agents':
+                    readme_image.write_bytes(png)
         await save('agents')
         app.selected_source = source_id
         await pilot.press('s')
@@ -116,5 +130,7 @@ async def capture(output: Path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--screenshots", type=Path, help="Also export PNG screenshots (requires CairoSVG)")
+    parser.add_argument("--readme-image", type=Path, help="Also export the agents overview as a README PNG")
     args = parser.parse_args()
-    asyncio.run(capture(args.output))
+    asyncio.run(capture(args.output, args.screenshots, args.readme_image))

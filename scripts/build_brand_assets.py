@@ -1,6 +1,6 @@
 """Build Agenturm's editable vector identity and raster exports.
 
-Requires CairoSVG. The mark is a watchtower: a clear vantage point over agent
+Requires CairoSVG. The mark is a broadcast tower: a clear vantage point over agent
 activity. All assets share the terminal's Alpine Ember palette. No external
 images or fonts are downloaded.
 """
@@ -13,25 +13,35 @@ import cairosvg
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "media" / "brand"
 NAVY = "#121018"
-CYAN = "#c5adff"
+LAVENDER = "#c5adff"
 GOLD = "#ffbd69"
 WHITE = "#f6f0e8"
 MUTED = "#b9afc5"
 
 
 def mark(background=True):
-    plate = f'<rect x="16" y="16" width="480" height="480" rx="112" fill="{NAVY}" stroke="#51475f" stroke-width="2"/>' if background else ""
+    plate = f'<rect x="16" y="16" width="480" height="480" rx="112" fill="{NAVY}" stroke="#302a3d" stroke-width="2"/>' if background else ""
     return f"""
 {plate}
-  <path d="M144 112h48v48h40v-48h48v48h40v-48h48v112h-40l16 144h24v40H144v-40h24l16-144h-40Z
-           M240 264v56h32v-56a16 16 0 0 0-32 0Z" fill="{GOLD}" fill-rule="evenodd"/>
+  <!-- Berlin's distinctive proportions: antenna, spherical deck, slim mast. -->
+  <path d="M252 62h8v28h-8Z M248 110h16v34h-16Z" fill="{GOLD}"/>
+  <path d="M250 90h12v20h-12Z" fill="{WHITE}"/>
+  <path d="M249 258h14l12 168h-38Z M218 426h76v10h-76Z" fill="{GOLD}"/>
+  <!-- A circular deck split by one thin band below the central hand lens. -->
+  <!-- The band and lens are true cutouts, not painted background rectangles. -->
+  <path fill="{LAVENDER}" fill-rule="evenodd" d="
+    M201.741 232a62 62 0 1 1 108.518 0Z
+    M205.522 238h100.956a62 62 0 0 1-100.956 0Z
+    M266.41 206.75l14.42 14.42-5.66 5.66-14.42-14.42a21 21 0 1 1 5.66-5.66Z
+    M262 195a13 13 0 1 0-26 0 13 13 0 1 0 26 0Z
+  "/>
 """
 
 
 def svg(width, height, body, title):
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
 <title id="title">{title}</title>
-<desc id="desc">A geometric amber tower with three battlements and a single observation window.</desc>
+<desc id="desc">A Berlin TV Tower-inspired broadcast tower with a lavender-purple spherical deck, a central magnifying glass, one thin observation band, a slender amber mast, and a banded antenna.</desc>
 {body}
 </svg>'''
 
@@ -72,7 +82,7 @@ def build():
 <rect width="1280" height="640" fill="{NAVY}"/>
 <g transform="translate(470 22) scale(.66)">{mark(False)}</g>
 <text x="640" y="428" fill="{WHITE}" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-weight="bold" font-size="62">Agenturm</text>
-<text x="640" y="488" fill="{CYAN}" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
+<text x="640" y="488" fill="{LAVENDER}" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="28">A clear view of every agent.</text>
 <text x="640" y="568" fill="{MUTED}" text-anchor="middle" font-family="DejaVu Sans Mono,monospace" font-size="17">LOCAL OBSERVABILITY  /  RIGHT IN YOUR TERMINAL</text>
 ''', "Agenturm social card")
     (OUT / "social-preview.svg").write_text(social)

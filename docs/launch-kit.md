@@ -13,11 +13,11 @@ uvx --from git+https://github.com/abhishekash/agenturm agenturm
 
 Requires uv and Python 3.11+. A machine with no supported session records needs
 a Codex/Claude Code task or telemetry from an instrumented agent before it can
-show activity. The README GIF uses synthetic records. Available details depend
+show activity. The README screenshot uses synthetic records. Available details depend
 on the producer's logs and instrumentation.
 
 - [Repository and first-minute guide](https://github.com/abhishekash/agenturm)
-- [Direct demo GIF](https://raw.githubusercontent.com/abhishekash/agenturm/main/media/goechala-demo-preview.gif)
+- [Current terminal screenshot](https://raw.githubusercontent.com/abhishekash/agenturm/main/media/agenturm-terminal.png)
 - [PyPI](https://pypi.org/project/agenturm/)
 - [First-run feedback](https://github.com/abhishekash/agenturm/issues/new?template=first_run.yml)
 - [SpanHound: MCP trace investigation](https://github.com/abhishekash/spanhound)
@@ -37,7 +37,7 @@ accepts OpenTelemetry from instrumented agents. The data is stored in local
 SQLite, with a keyboard-first terminal interface. A small HTTP receiver accepts telemetry locally.
 
 Try it with `uvx --from git+https://github.com/abhishekash/agenturm agenturm`. It works best
-on a machine where you already use Codex or Claude Code. The README animation uses synthetic example data; your terminal view
+on a machine where you already use Codex or Claude Code. The README screenshot uses synthetic example data; your terminal view
 shows what your local records or telemetry actually contain.
 
 This is an early MIT-licensed project. I would like feedback on missing tool
@@ -71,7 +71,7 @@ agent workflows and tell me which debugging questions remain hard to answer.
 
 #OpenTelemetry #MCP #AIAgents #OpenSource
 
-Attach the Goechala GIF or SpanHound's captioned video. Lead with one concrete
+Attach the Agenturm terminal screenshot or SpanHound's captioned video. Lead with one concrete
 debugging task when adapting this copy for another community.
 
 ## Launch order and measurement

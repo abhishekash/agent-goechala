@@ -20,13 +20,13 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Grid, Horizontal, Vertical
 from textual.screen import Screen
 from textual.strip import Strip
 from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
-from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead
+from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead, tower_mark
 from .themes import PALETTES, supported_themes, themed_style, themed_text
 
 
@@ -484,6 +484,14 @@ def wait_label(item):
     return reason or '—'
 
 
+def task_text(item):
+    """Keep real tasks prominent and missing descriptions quiet."""
+    task=clean(' '.join(str(item.get('task') or '').split()))
+    if not task or task=='Task not reported':
+        return Text('Not reported',style='italic #b9afc5',no_wrap=True)
+    return Text(task,style='#f6f0e8',no_wrap=False,overflow='ellipsis')
+
+
 def input_status(item):
     """Name only user actions explicitly reported by a session."""
     if not input_required(item):
@@ -510,6 +518,16 @@ def coverage_warning(local_status):
 
 class ResultsTable(DataTable):
     """Size columns to the panel while keeping the selected record on resize."""
+    def preview_height(self,values):
+        if self.id!='agent-table' or not self.column_widths or not values:
+            return 1
+        task=values[-1]
+        return min(2,max(1,len(task.wrap(self.app.console,self.column_widths[-1]))))
+
+    def add_row(self,*cells,**kwargs):
+        kwargs.setdefault('height',self.preview_height(cells))
+        return super().add_row(*cells,**kwargs)
+
     def configure(self, columns):
         self.column_specs=columns
         self.column_widths=()
@@ -626,19 +644,21 @@ class ObservatoryApp(App):
     Screen { background: $agent-canvas; color: $agent-text; }
     Screen > .screen--selection { background: $agent-selection; color: $agent-on-selection; }
     * { scrollbar-color: $agent-scrollbar; scrollbar-color-hover: $agent-secondary; scrollbar-color-active: $agent-primary; scrollbar-background: $agent-surface; scrollbar-background-hover: $agent-surface; scrollbar-background-active: $agent-surface; }
-    #masthead { height: 3; padding: 0 2; align-vertical: middle; background: $agent-panel; border-bottom: solid $agent-border; }
-    #brand { width: 1fr; height: 1; color: $agent-text; text-wrap: nowrap; }
-    #connection { width: auto; color: $agent-success; text-align: right; text-wrap: nowrap; }
-    #summary { height: 3; margin: 1 2 0 2; }
-    .stat { width: 1fr; border-left: solid $agent-border-subtle; background: $agent-surface; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
+    #masthead { height: 5; padding: 0 2; align-vertical: middle; background: $agent-canvas; }
+    #tower { width: 5; height: 5; margin-right: 2; }
+    #brand { width: 1fr; height: 1; margin-top: 2; color: $agent-text; text-wrap: nowrap; }
+    #connection { width: auto; max-width: 50%; height: 1; margin-top: 2; color: $agent-success; text-align: right; text-wrap: nowrap; text-overflow: ellipsis; }
+    #summary { height: 3; margin: 1 2; grid-size: 4; grid-columns: 1fr; grid-rows: 3; }
+    .stat { height: 3; min-width: 0; border-left: solid $agent-border-subtle; background: $agent-surface; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
     #stat-sessions { border-left: solid $agent-primary; }
     #stat-processes { border-left: solid $agent-success; }
     #stat-mcp-count { border-left: solid $agent-secondary; }
     #stat-usage { border-left: solid $agent-info; }
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
-    #scope-label { width: 7; height: 1; margin-top: 1; color: $agent-muted; }
-    #scope { width: 37; margin-right: 1; }
+    #scope-label { width: 6; height: 1; margin-top: 1; color: $agent-muted; }
+    #scope { width: 32; margin-right: 1; }
     SelectCurrent { background: $agent-panel; border: tall $agent-border; }
+    SelectCurrent #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
     Select:focus > SelectCurrent { border: tall $agent-primary; background-tint: transparent; }
     SelectOverlay { background: $agent-panel; border: tall $agent-primary; }
     #controls-spacer { width: 1fr; }
@@ -679,6 +699,7 @@ class ObservatoryApp(App):
     .history-controls Button { min-width: 8; width: auto; height: 1; padding: 0 1; margin-left: 1; border: none; }
     .history-controls Button:focus { background: $agent-cursor; color: $agent-on-selection; }
     #history-back { width: 10; margin-right: 1; }
+    #history-back:disabled { display: none; }
     DataTable { background: $agent-surface; height: 1fr; scrollbar-size: 1 1; }
     DataTable:focus { background-tint: transparent; }
     DataTable > .datatable--header { background: $agent-header; color: $agent-secondary; text-style: bold; }
@@ -716,19 +737,25 @@ class ObservatoryApp(App):
     FooterKey > .footer-key--description { background: $agent-panel; color: $agent-label; }
     FooterLabel { background: $agent-panel; color: $agent-label; }
     .narrow #masthead { padding: 0 1; }
-    .narrow #summary { margin: 0 1; }
+    .narrow #summary { margin: 1 1; }
     .narrow .stat { padding: 0 1; }
     .narrow #controls { margin: 0 1; }
-    .narrow #scope { width: 29; }
+    .narrow #scope { width: 32; }
     .narrow #pages { margin: 0 1; }
     .narrow Tab { padding: 0 1; }
     .narrow #agent-bottom { height: 12; }
     .narrow .split { layout: vertical; }
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail, .narrow #trace-detail { width: 100%; height: 1fr; }
-    .compact #masthead { height: 2; border-bottom: none; }
-    .compact #brand { height: 1; }
-    .compact #summary { margin-bottom: 0; }
+    .small #summary { height: 6; grid-size: 2; }
+    .small #connection { max-width: 40%; }
+    .small #pause { width: 9; }
+    .compact #masthead { height: 1; }
+    .compact #tower { height: 1; }
+    .compact #brand, .compact #connection { margin-top: 0; }
+    .compact #summary { height: 2; margin: 1 1 0 1; grid-rows: 2; }
+    .compact .stat { height: 2; }
+    .compact.small #summary { height: 4; }
     .compact Tabs { height: 2; padding-top: 0; margin-top: 0; }
     .compact #agent-bottom, .compact .detail, .compact #trace-detail, .compact #host-detail { display: none; }
     .compact .list { width: 100%; height: 1fr; margin: 0; }
@@ -815,9 +842,10 @@ class ObservatoryApp(App):
 
     def compose(self)->ComposeResult:
         with Horizontal(id='masthead'):
+            yield Static(tower_mark(), id='tower')
             yield Static(masthead(), id='brand')
             yield Static('○ Connecting',id='connection',markup=False)
-        with Horizontal(id='summary'):
+        with Grid(id='summary'):
             for name in ('sessions','processes','mcp-count','usage'):
                 yield Static('',id='stat-'+name,classes='stat',markup=False)
         with Horizontal(id='controls'):
@@ -893,7 +921,7 @@ class ObservatoryApp(App):
     def on_mount(self):
         self.theme_changed_signal.subscribe(self, self.on_theme_changed)
         columns={
-            'agent-table':[('Agent',11,0),('Session ID',12,1),('Repo / project',14,2),('Status',12,0),('Updated',8,0),('Waiting on',16,2),('Task / details',22,4)],
+            'agent-table':[('Agent',11,0),('Session ID',10,0),('Repo / project',14,0),('Status',14,0),('Updated',8,0),('Task / details',32,1)],
             'agent-actions':[('Time',8,0),('Type',7,0),('Recent actions',15,1)],
             'activity-table':[('Time',8,0),('Type',7,0),('Result',9,0),('Action',20,1)],
             'mcp-servers':[('Server · Enter filters operations',24,3),('Inventory',22,2),('Operations',8,0),('Metric calls',11,0),('Tools',8,0),('Errors',8,0)],
@@ -951,13 +979,17 @@ class ObservatoryApp(App):
     def update_layout(self,size=None):
         size=size or self.size
         self.screen.set_class(size.width<140,'narrow')
+        self.screen.set_class(size.width<100,'small')
         self.screen.set_class(size.height<36,'compact')
+        for tower in self.query('#tower'):
+            tower.update(themed_text(tower,tower_mark(compact=size.height<36)))
         for brand in self.query('#brand'):
-            brand.update(themed_text(brand,masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36)))
+            brand.update(themed_text(brand,masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36 or size.width<100)))
+        self.last_update=-1
 
     def stat(self,name,value,label,detail):
         accent={'sessions':AMBER,'processes':MINT,'mcp-count':LAVENDER,'usage':ICE}[name]
-        text=Text(label.upper()+'\n',style='#e1d9eb',no_wrap=True,overflow='ellipsis')
+        text=Text(label.upper()+'\n',style='#b9afc5',no_wrap=True,overflow='ellipsis')
         text.append(str(value),style='bold '+accent)
         text.append('\n'+detail,style='#b9afc5')
         self.query_one('#stat-'+name,Static).update(themed_text(self.query_one('#stat-'+name),text))
@@ -979,7 +1011,8 @@ class ObservatoryApp(App):
         scroll=table.scroll_offset
         old_index=table.cursor_row
         with table.prevent(DataTable.RowHighlighted):
-            if [key.value for key in table.rows]==[key for key,_,_ in rows]:
+            if ([key.value for key in table.rows]==[key for key,_,_ in rows] and
+                all(table.rows[key].height==table.preview_height(values) for key,values,_ in rows)):
                 for key,values,_ in rows:
                     for column,value in zip(table.columns,values):
                         previous=table.get_cell(key,column)
@@ -1018,7 +1051,8 @@ class ObservatoryApp(App):
         connection='Ⅱ Paused' if self.feed.paused else '○ Reconnecting' if data.error else '● Connected'
         endpoint=self.feed.api.endpoint.removeprefix('http://').removeprefix('https://')
         connection_widget=self.query_one('#connection',Static)
-        connection_widget.update(themed_text(connection_widget,Text(connection+'  '+endpoint,
+        connection_widget.tooltip=connection+' · '+endpoint
+        connection_widget.update(themed_text(connection_widget,Text(connection+('  '+endpoint if self.size.width>=120 else ''),
             style='#ffbd69' if self.feed.paused else '#ff8799' if data.error else '#86e3b5')))
         health_text=(data.error if data.error else
             f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}")
@@ -1040,8 +1074,12 @@ class ObservatoryApp(App):
         live=sum(not str(item.get('state','')).startswith(('Z','X')) for item in processes)
         waiting=sum(item['state']=='Waiting' for item in work)
         replies=sum(input_required(item) for item in work)
-        self.stat('sessions',len(work),'Agent sessions',f'{recent} updated recently · {waiting} waiting · {replies} need action')
-        self.stat('processes',live,'Host processes','PIDs on this host')
+        session_detail=f'{recent} recent · {waiting} waiting · {replies} action'
+        stat_width=(self.size.width-(4 if self.size.width>=140 else 2))//(2 if self.size.width<100 else 4)
+        if cell_len(session_detail)>stat_width-(5 if self.size.width>=140 else 3):
+            session_detail=f'{waiting} waiting · {replies} action'
+        self.stat('sessions',len(work),'Agent sessions',session_detail)
+        self.stat('processes',live,'Host processes','Live on this host')
         servers={item.get('server') for item in data.mcp if item.get('server') and item.get('server')!='Not reported'}
         operations={(item.get('server'),item.get('tool')) for item in data.mcp if item.get('tool') and item.get('tool')!='Not reported'}
         mcp_errors=sum(str(item.get('status','')).upper() in {'ERROR','FAILED'} for item in data.mcp)
@@ -1050,9 +1088,9 @@ class ObservatoryApp(App):
         server_count=len(inventory['servers']) if inventory else len(servers)
         tool_count=inventory.get('tools',len(operations))
         mcp_errors=inventory.get('errors',mcp_errors)
-        self.stat('mcp-count',quantity(call_count,'call')+('' if self.size.width<110 else ' · '+quantity(server_count,'server')),'Observed MCP',
-                  f'{quantity(server_count,"server")} · {quantity(mcp_errors,"error")}' if self.size.width<110 else f'{quantity(tool_count,"tool")} · {quantity(mcp_errors,"error")}')
-        self.query_one('#stat-mcp-count').tooltip='All stored calls in the selected scope. Configured servers appear only after an observed call.\n'+', '.join(row['server'] for row in inventory.get('servers',[]))
+        self.stat('mcp-count',number(call_count),'MCP calls',
+                  f'{quantity(server_count,"server")} · {quantity(mcp_errors,"error")}')
+        self.query_one('#stat-mcp-count').tooltip=f'{quantity(tool_count,"tool")} · All stored calls in the selected scope. Configured servers appear only after an observed call.\n'+', '.join(row['server'] for row in inventory.get('servers',[]))
         if inventory.get('metric_calls'):
             self.query_one('#stat-mcp-count').tooltip += (
                 f"\nCursor aggregate MCP metric: {number(inventory['metric_calls'])} calls across all conversations; "
@@ -1060,8 +1098,8 @@ class ObservatoryApp(App):
         self.query_one('#mcp-servers').tooltip=(
             'Calls are individual calls with operation details. Metric calls are Cursor aggregate counts; '
             'they cannot be opened or attributed to a session. Calls without a reported server are listed separately.')
-        self.stat('usage',observed_count(data.totals,'input_tokens')+' / '+observed_count(data.totals,'output_tokens'),'Tokens in / out','Headline totals include cached input. Cache read/write and reasoning counts are breakdowns, not additional tokens.')
-        self.query_one('#stat-sessions').tooltip=f'{reviews} approval reviews · Recent means a session record changed within 35 seconds'
+        self.stat('usage',observed_count(data.totals,'input_tokens')+' / '+observed_count(data.totals,'output_tokens'),'Tokens in / out','Includes cached input')
+        self.query_one('#stat-sessions').tooltip=f'{recent} updated recently · {waiting} waiting · {replies} need action\n{reviews} approval reviews · Recent means a session record changed within 35 seconds'
         self.query_one('#stat-usage').tooltip=(
             'Recorded token totals; repeated and cached input is included. '
             f"Cache read {observed_count(data.totals,'cache_read_input_tokens')} · "
@@ -1081,8 +1119,7 @@ class ObservatoryApp(App):
             cell(item['runtime']),cell(item.get('session_id') or item['id'],'#c5adff'),
             cell(item.get('project') or '—'),
             cell(input_status(item),'bold #ff8799' if input_required(item) else '#ffbd69' if item['state']=='Waiting' else '#86e3b5' if item['recent'] else '#b9afc5'),
-            cell(age(item['stamp']),'#b9afc5'),cell(wait_label(item)),
-            cell(item.get('task') or 'Task not reported')],item) for item in visible_agents])
+            cell(age(item['stamp']),'#b9afc5'),task_text(item)],item) for item in visible_agents])
         self.search_status('agents',len(visible_agents),'session')
         if self.selected_source not in {item['id'] for item in visible_agents}:self.selected_source=visible_agents[0]['id'] if visible_agents else None
         self.show_agent()
