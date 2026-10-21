@@ -916,7 +916,7 @@ class ObservatoryApp(App):
         self.query_one('#host-detail').styles.height=8
         self.update_layout()
         if not self.feed.thread.is_alive():self.feed.thread.start()
-        self.refresh_timer=self.set_interval(.3,self.refresh_data)
+        self.refresh_timer=self.set_interval(.5,self.refresh_data)
         self.query_one('#agent-table',DataTable).focus()
 
     def on_unmount(self):
@@ -981,7 +981,12 @@ class ObservatoryApp(App):
         with table.prevent(DataTable.RowHighlighted):
             if [key.value for key in table.rows]==[key for key,_,_ in rows]:
                 for key,values,_ in rows:
-                    for column,value in zip(table.columns,values):table.update_cell(key,column,value)
+                    for column,value in zip(table.columns,values):
+                        previous=table.get_cell(key,column)
+                        # Rich Text equality excludes its base style; a theme
+                        # change must still recolor otherwise identical cells.
+                        if previous!=value or getattr(previous,'style',None)!=getattr(value,'style',None):
+                            table.update_cell(key,column,value)
             else:
                 table.clear()
                 for key,values,record in rows:table.add_row(*values,key=key)

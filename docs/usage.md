@@ -73,6 +73,30 @@ Discovery scans every 10 seconds and tails discovered files every second. It sel
 
 Local discovery runs in the receiver. If you installed an earlier version, reinstall the CLI and restart that receiver to enable it. A cockpit attached to an older receiver cannot enable discovery there. Add `--no-local-agents` to `serve` or `cockpit` to disable discovery in a receiver started by that command. Receivers bound to non-loopback addresses do not discover local sessions automatically. Other agent products still need an adapter or OTLP export.
 
+### Resource usage
+
+The terminal fetches live data every two seconds; session inventory, MCP,
+metrics, usage and findings are cached for five seconds. Filter and selection
+actions can wake the feed immediately. Collection continues independently, even
+when display updates are paused. Tables update changed cells instead of
+invalidating an entire row.
+
+OpenCode polling skips unchanged databases. When a database changes, unchanged
+messages are not normalized or written again. On schemas with part update
+timestamps, unchanged tool payloads are not loaded again; older schemas fall
+back to content comparison. Revision caches contain only fixed-size digests
+within the 50-session / 30-message import window, not retained tool outputs.
+Initial import still costs more than steady-state monitoring, and large
+histories or sustained telemetry can increase CPU, memory and database size.
+
+Run `python scripts/benchmark_resources.py` for a repeatable synthetic reader
+benchmark (idle, unrelated database writes, and one changed tool). It uses a
+temporary database, not personal sessions. Results measure reader CPU, logical
+reads and span write counts; they exclude terminal rendering and derived Store
+work. Regression tests in `tests/test_resource_usage.py` and
+`tests/test_opencode.py` enforce polling, cache and redundant-write behavior
+without relying on hardware-dependent CPU thresholds.
+
 ### OpenCode local database
 
 On loopback, the receiver checks OpenCode's local SQLite database in read-only

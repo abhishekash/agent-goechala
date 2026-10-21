@@ -4,7 +4,9 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from observatory.core import Store
 from observatory.opencode import OpenCodeReader, _opencode_mcp_attributes
@@ -17,6 +19,7 @@ class OpenCodeReaderTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.database = self.root / "opencode.db"
         self.store = Store(self.root / "observatory.db")
+        self.addCleanup(self.store.close)
         db = sqlite3.connect(self.database)
         db.executescript("""
             CREATE TABLE project(id TEXT PRIMARY KEY, name TEXT, worktree TEXT);
@@ -142,6 +145,112 @@ class OpenCodeReaderTests(unittest.TestCase):
         self.assertGreater(reader.poll(), 0)
         progress = self.store.trace(trace_id)["progress"]
         self.assertEqual([event["percent"] for event in progress], [33.33, 66.67])
+
+    def test_unrelated_database_writes_do_not_reingest_messages(self):
+        reader = OpenCodeReader(self.store, path=self.database)
+        reader.poll()
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("CREATE TABLE unrelated(value TEXT)")
+        with patch.object(self.store, 'ingest') as ingest, patch.object(self.store, 'ingest_logs') as logs:
+            self.assertEqual(reader.poll(), 0)
+            ingest.assert_not_called()
+            logs.assert_not_called()
+        self.assertEqual(len(reader._message_revisions), 1)
+        self.assertTrue(all(isinstance(value, bytes) and len(value) == 32
+                            for value in reader._message_revisions.values()))
+
+    def test_unchanged_database_does_not_open_a_connection(self):
+        reader = OpenCodeReader(self.store, path=self.database)
+        reader.poll()
+        with patch('observatory.opencode.sqlite3.connect') as connect:
+            self.assertEqual(reader.poll(), 0)
+        connect.assert_not_called()
+
+    def test_message_revision_cache_stays_within_the_import_window(self):
+        with closing(sqlite3.connect(self.database)) as db, db:
+            template = db.execute('SELECT * FROM message').fetchone()
+            for index in range(4):
+                db.execute('INSERT INTO message VALUES(?,?,?,?,?)',
+                           (f'message-{index}', *template[1:]))
+        reader = OpenCodeReader(self.store, path=self.database)
+        with patch('observatory.opencode.MAX_MESSAGES_PER_SESSION', 2):
+            reader.poll()
+        self.assertEqual(len(reader._message_revisions), 2)
+
+    def test_part_changes_without_session_or_message_updates_are_captured(self):
+        for timestamped in (False, True):
+            with self.subTest(timestamped=timestamped):
+                if timestamped:
+                    with closing(sqlite3.connect(self.database)) as db, db:
+                        db.execute('ALTER TABLE part ADD COLUMN time_updated INTEGER DEFAULT 1')
+                reader = OpenCodeReader(self.store, path=self.database)
+                reader.poll()
+                with closing(sqlite3.connect(self.database)) as db, db:
+                    data = json.loads(db.execute('SELECT data FROM part').fetchone()[0])
+                    data['state']['output'] = {'count': 4 if timestamped else 3}
+                    db.execute('UPDATE part SET data=?', (json.dumps(data),))
+                    if timestamped:
+                        db.execute('UPDATE part SET time_updated=2')
+                self.assertGreater(reader.poll(), 0)
+                output = self.store.mcp_page()['calls'][0]['output']
+                self.assertIn(str(data['state']['output']['count']), str(output))
+
+    def test_timestamped_parts_do_not_reload_unchanged_payloads(self):
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('ALTER TABLE part ADD COLUMN time_updated INTEGER DEFAULT 1')
+        reader = OpenCodeReader(self.store, path=self.database)
+        reader.poll()
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('UPDATE session SET time_updated=time_updated+1')
+        statements = []
+        connect = sqlite3.connect
+        def traced_connect(*args, **kwargs):
+            db = connect(*args, **kwargs)
+            db.set_trace_callback(statements.append)
+            return db
+        with patch('observatory.opencode.sqlite3.connect', side_effect=traced_connect):
+            self.assertEqual(reader.poll(), 0)
+        part_reads = [sql for sql in statements if 'FROM "part"' in sql]
+        self.assertTrue(part_reads)
+        self.assertTrue(all('"data"' not in sql for sql in part_reads))
+
+    def test_unpopulated_part_timestamps_fall_back_to_content_comparison(self):
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('ALTER TABLE part ADD COLUMN time_updated INTEGER')
+        reader = OpenCodeReader(self.store, path=self.database)
+        reader.poll()
+        with closing(sqlite3.connect(self.database)) as db, db:
+            data = json.loads(db.execute('SELECT data FROM part').fetchone()[0])
+            data['state']['output'] = 'changed without a timestamp'
+            db.execute('UPDATE part SET data=?', (json.dumps(data),))
+        self.assertGreater(reader.poll(), 0)
+        self.assertIn('changed without a timestamp', str(self.store.mcp_page()['calls'][0]['output']))
+
+    def test_mcp_configuration_changes_reprocess_existing_messages(self):
+        reader = OpenCodeReader(self.store, path=self.database)
+        reader.poll()
+        reader.set_mcp_servers(['github'])
+        self.assertGreater(reader.poll(), 0)
+
+    def test_revision_cache_is_pruned_and_missing_database_resets_it(self):
+        reader = OpenCodeReader(self.store, path=self.database)
+        reader.poll()
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('DELETE FROM session')
+        reader.poll()
+        self.assertEqual(reader._message_revisions, {})
+        self.assertEqual(reader._progress_revisions, {})
+        self.database.unlink()
+        reader.poll()
+        self.assertIsNone(reader.fingerprint)
+
+    def test_failed_ingestion_does_not_cache_uncommitted_revisions(self):
+        reader = OpenCodeReader(self.store, path=self.database)
+        with patch.object(self.store, 'ingest', side_effect=RuntimeError('busy')):
+            with self.assertRaises(RuntimeError):
+                reader.poll()
+        self.assertEqual(reader._message_revisions, {})
+        self.assertGreater(reader.poll(), 0)
 
     def test_configured_server_prefix_identifies_opencode_mcp_tool(self):
         db = sqlite3.connect(self.database)
