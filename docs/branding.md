@@ -44,8 +44,10 @@ space around it. At small sizes, use the mark without a wordmark.
 Use color to support text, never as the sole status indicator. Focus remains
 visible through borders and selected rows. The identity is static: no flashing
 logo or decorative loading animation. The terminal uses a five-column, five-row
-block-and-line tower in its own bounded widget beside the single-line **Agenturm** wordmark.
-Short terminals use a one-line mark. No image protocols, emoji rendering, or Nerd
+block-and-line tower in its own bounded widget beside a bold, single-line
+**Agenturm** wordmark, a slim divider, and the uppercase tagline. Demo mode adds
+a filled amber **DEMO** badge. Short terminals use a one-line mark and drop the
+tagline. No image protocols, emoji rendering, or Nerd
 Font is required. Below 100 columns, summary cards form two rows; longer explanations
 live in tooltips rather than running off the edge of a card.
 The terminal mark has no background tile: it uses the active terminal canvas.

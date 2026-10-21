@@ -644,7 +644,7 @@ class ObservatoryApp(App):
     Screen { background: $agent-canvas; color: $agent-text; }
     Screen > .screen--selection { background: $agent-selection; color: $agent-on-selection; }
     * { scrollbar-color: $agent-scrollbar; scrollbar-color-hover: $agent-secondary; scrollbar-color-active: $agent-primary; scrollbar-background: $agent-surface; scrollbar-background-hover: $agent-surface; scrollbar-background-active: $agent-surface; }
-    #masthead { height: 5; padding: 0 2; align-vertical: middle; background: $agent-canvas; }
+    #masthead { height: 6; padding: 0 2; align-vertical: middle; background: $agent-canvas; border-bottom: solid $agent-border-subtle; }
     #tower { width: 5; height: 5; margin-right: 2; }
     #brand { width: 1fr; height: 1; margin-top: 2; color: $agent-text; text-wrap: nowrap; }
     #connection { width: auto; max-width: 50%; height: 1; margin-top: 2; color: $agent-success; text-align: right; text-wrap: nowrap; text-overflow: ellipsis; }
@@ -750,7 +750,7 @@ class ObservatoryApp(App):
     .small #summary { height: 6; grid-size: 2; }
     .small #connection { max-width: 40%; }
     .small #pause { width: 9; }
-    .compact #masthead { height: 1; }
+    .compact #masthead { height: 1; border-bottom: none; }
     .compact #tower { height: 1; }
     .compact #brand, .compact #connection { margin-top: 0; }
     .compact #summary { height: 2; margin: 1 1 0 1; grid-rows: 2; }
@@ -1048,12 +1048,17 @@ class ObservatoryApp(App):
         # Timer messages can already be queued when child widgets unmount.
         if not self.query('#health'):return
         data=self.feed.snapshot
-        connection='Ⅱ Paused' if self.feed.paused else '○ Reconnecting' if data.error else '● Connected'
+        state='Paused' if self.feed.paused else 'Reconnecting' if data.error else 'Connected'
+        state_color='#ffbd69' if self.feed.paused else '#ff8799' if data.error else '#86e3b5'
         endpoint=self.feed.api.endpoint.removeprefix('http://').removeprefix('https://')
         connection_widget=self.query_one('#connection',Static)
-        connection_widget.tooltip=connection+' · '+endpoint
-        connection_widget.update(themed_text(connection_widget,Text(connection+('  '+endpoint if self.size.width>=120 else ''),
-            style='#ffbd69' if self.feed.paused else '#ff8799' if data.error else '#86e3b5')))
+        connection_widget.tooltip=state+' · '+endpoint
+        connection=Text()
+        connection.append('● ', style='bold '+state_color)
+        connection.append(state, style='bold '+state_color)
+        if self.size.width>=120:
+            connection.append('  '+endpoint, style='#b9afc5')
+        connection_widget.update(themed_text(connection_widget,connection))
         health_text=(data.error if data.error else
             f"{'Display paused' if self.feed.paused else 'Updated '+age(int(data.updated*1e9))}  ·  {self.scope_label()}  ·  {'Reviews included' if self.feed.include_reviews else 'Reviews hidden'}")
         coverage=coverage_warning(data.local_status)
