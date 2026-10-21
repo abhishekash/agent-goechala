@@ -43,18 +43,18 @@ space around it. At small sizes, use the mark without a wordmark.
 
 Use color to support text, never as the sole status indicator. Focus remains
 visible through borders and selected rows. The identity is static: no flashing
-logo or decorative loading animation. The terminal uses a five-column, five-row
-block-and-line tower in its own bounded widget beside a bold, single-line
-**Agenturm** wordmark, a slim divider, and the uppercase tagline. Demo mode adds
-a filled amber **DEMO** badge. The lockup is centered horizontally, while the
-connection status stays at the right edge. Short terminals use a one-line mark and drop the
-tagline. No image protocols, emoji rendering, or Nerd
-Font is required. Below 100 columns, summary cards form two rows; longer explanations
-live in tooltips rather than running off the edge of a card.
-The terminal mark has no background tile: it uses the active terminal canvas.
-Its sphere follows the theme's purple/secondary color (a darker purple in Bright), while
-the mast follows the primary accent. Both meet at least 4.5:1 contrast against
-the canvas in every supported theme.
+logo or decorative loading animation. The terminal carries the identity as text
+only: a bold **Agenturm** wordmark, a slim divider, and the README tagline, all
+on a single line. Demo mode adds a filled amber **DEMO** badge. The lockup is
+centered horizontally, while connection status stays at the right edge; the full
+endpoint is available in its tooltip. Short terminals drop the tagline to leave
+the name alone, and the MCP server inventory is hidden to preserve room for the
+session and call tables. The keyboard map appears beside the scope control in
+the footer's key style, and drops out below 140 columns. No image protocols, emoji rendering, or Nerd Font is
+required. Below 100 columns, summary cards form two rows; longer explanations
+live in tooltips rather than running off the edge of a card. The wordmark uses
+the theme's primary text color and the tagline its supporting color; both meet
+at least 4.5:1 contrast against the canvas in every supported theme.
 
 ## Terminal themes
 

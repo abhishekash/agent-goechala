@@ -26,7 +26,7 @@ from textual.strip import Strip
 from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
-from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead, tower_mark
+from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead, shortcut_hints
 from .themes import PALETTES, supported_themes, themed_style, themed_text
 
 
@@ -644,12 +644,11 @@ class ObservatoryApp(App):
     Screen { background: $agent-canvas; color: $agent-text; }
     Screen > .screen--selection { background: $agent-selection; color: $agent-on-selection; }
     * { scrollbar-color: $agent-scrollbar; scrollbar-color-hover: $agent-secondary; scrollbar-color-active: $agent-primary; scrollbar-background: $agent-surface; scrollbar-background-hover: $agent-surface; scrollbar-background-active: $agent-surface; }
-    #masthead { layout: grid; grid-size: 3; grid-columns: 1fr auto 1fr; grid-rows: 5; height: 6; padding: 0 2; align-vertical: middle; background: $agent-canvas; border-bottom: solid $agent-border-subtle; }
-    #brand-lockup { width: auto; height: 5; align-vertical: middle; }
-    #tower { width: 5; height: 5; margin-right: 2; }
+    #masthead { layout: grid; grid-size: 3; grid-columns: 1fr auto 1fr; grid-rows: 1; height: 2; padding: 0 2; background: $agent-canvas; border-bottom: solid $agent-border-subtle; }
+    #brand-lockup { width: auto; height: 1; align-vertical: middle; }
     #brand { width: auto; height: 1; color: $agent-text; text-wrap: nowrap; }
     #connection { width: 100%; height: 1; color: $agent-success; text-align: right; text-wrap: nowrap; text-overflow: ellipsis; }
-    #summary { height: 3; margin: 1 2; grid-size: 4; grid-columns: 1fr; grid-rows: 3; }
+    #summary { height: 3; margin: 0 2 1 2; grid-size: 4; grid-columns: 1fr; grid-rows: 3; }
     .stat { height: 3; min-width: 0; border-left: solid $agent-border-subtle; background: $agent-surface; padding: 0 2; text-wrap: nowrap; text-overflow: ellipsis; }
     #stat-sessions { border-left: solid $agent-primary; }
     #stat-processes { border-left: solid $agent-success; }
@@ -658,6 +657,7 @@ class ObservatoryApp(App):
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
     #scope-label { width: 6; height: 1; margin-top: 1; color: $agent-muted; }
     #scope { width: 32; margin-right: 1; }
+    #shortcuts { height: 1; margin-top: 1; margin-right: 2; color: $agent-muted; text-wrap: nowrap; }
     SelectCurrent { background: $agent-panel; border: tall $agent-border; }
     SelectCurrent #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
     Select:focus > SelectCurrent { border: tall $agent-primary; background-tint: transparent; }
@@ -738,10 +738,11 @@ class ObservatoryApp(App):
     FooterKey > .footer-key--description { background: $agent-panel; color: $agent-label; }
     FooterLabel { background: $agent-panel; color: $agent-label; }
     .narrow #masthead { padding: 0 1; }
-    .narrow #summary { margin: 1 1; }
+    .narrow #summary { margin: 0 1 1 1; }
     .narrow .stat { padding: 0 1; }
     .narrow #controls { margin: 0 1; }
     .narrow #scope { width: 32; }
+    .narrow #shortcuts { display: none; }
     .narrow #pages { margin: 0 1; }
     .narrow Tab { padding: 0 1; }
     .narrow #agent-bottom { height: 12; }
@@ -749,15 +750,14 @@ class ObservatoryApp(App):
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail, .narrow #trace-detail { width: 100%; height: 1fr; }
     .small #summary { height: 6; grid-size: 2; }
+    .small #agent-bottom { height: 9; }
     .small #pause { width: 9; }
-    .compact #masthead { height: 1; grid-rows: 1; border-bottom: none; }
-    .compact #brand-lockup { height: 1; }
-    .compact #tower { height: 1; }
-    .compact #brand, .compact #connection { margin-top: 0; }
-    .compact #summary { height: 2; margin: 1 1 0 1; grid-rows: 2; }
+    .compact #masthead { height: 1; border-bottom: none; }
+    .compact #summary { height: 2; margin: 0 1; grid-rows: 2; }
     .compact .stat { height: 2; }
     .compact.small #summary { height: 4; }
     .compact Tabs { height: 2; padding-top: 0; margin-top: 0; }
+    .compact #mcp-servers { display: none; }
     .compact #agent-bottom, .compact .detail, .compact #trace-detail, .compact #host-detail { display: none; }
     .compact .list { width: 100%; height: 1fr; margin: 0; }
     .expanded .results { display: none; }
@@ -845,7 +845,6 @@ class ObservatoryApp(App):
         with Horizontal(id='masthead'):
             yield Static('', id='masthead-left')
             with Horizontal(id='brand-lockup'):
-                yield Static(tower_mark(), id='tower')
                 yield Static(masthead(), id='brand')
             yield Static('○ Connecting',id='connection',markup=False)
         with Grid(id='summary'):
@@ -855,6 +854,7 @@ class ObservatoryApp(App):
             yield Button('← Back',id='history-back',disabled=True,tooltip='Return to the event you opened · Alt+Left')
             yield Static('Scope',id='scope-label')
             yield Select([('All agent sessions','all')],value='all',allow_blank=False,id='scope')
+            yield Static(shortcut_hints(),id='shortcuts')
             yield Static('',id='controls-spacer')
             yield Checkbox('Reviews',id='reviews')
             yield Button('Pause',id='pause')
@@ -942,6 +942,8 @@ class ObservatoryApp(App):
             self.query_one('#search-'+page).tooltip='Search this view · / to focus · Esc to return'
         self.query_one('#reviews').tooltip='Include internal approval review sessions'
         self.query_one('#pause').tooltip='Pause display updates · collection continues'
+        # The hints keep their own width so the scope and controls keep theirs.
+        self.query_one('#shortcuts').styles.width=cell_len(shortcut_hints().plain)
         for log in self.query(SelectableRichLog):
             log.tooltip='Drag to select text · Ctrl+C copies selection · c copies details'
         self.query_one('#host-detail').styles.height=8
@@ -984,10 +986,10 @@ class ObservatoryApp(App):
         self.screen.set_class(size.width<140,'narrow')
         self.screen.set_class(size.width<100,'small')
         self.screen.set_class(size.height<36,'compact')
-        for tower in self.query('#tower'):
-            tower.update(themed_text(tower,tower_mark(compact=size.height<36)))
         for brand in self.query('#brand'):
             brand.update(themed_text(brand,masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36 or size.width<100)))
+        for hints in self.query('#shortcuts'):
+            hints.update(themed_text(hints,shortcut_hints()))
         self.last_update=-1
 
     def stat(self,name,value,label,detail):
@@ -1059,7 +1061,7 @@ class ObservatoryApp(App):
         connection=Text()
         connection.append('● ', style='bold '+state_color)
         connection.append(state, style='bold '+state_color)
-        if self.size.width>=120:
+        if self.size.width>=160 and len(endpoint)<=24:
             connection.append('  '+endpoint, style='#b9afc5')
         connection_widget.update(themed_text(connection_widget,connection))
         health_text=(data.error if data.error else
@@ -1889,6 +1891,31 @@ class ObservatoryApp(App):
         self.query_one('#pages',TabbedContent).active=page
         target={'agents':'agent-table','activity':'activity-table','mcp':'mcp-table','traces':'trace-table','host':'host-table','metrics':'metrics-table','findings':'finding-table'}[page]
         self.query_one('#'+target).focus()
+    def linked_agent_trace(self):
+        """The trace recorded for the selected session, when one is linked.
+
+        Recent work first, then the session's own last event, then a recorded
+        trace for the same session, then one whose task names the same work.
+        """
+        session=getattr(self,'source_map',{}).get(self.selected_source)
+        if not session:return None
+        traces=list(self.data.traces) if self.data else []
+        known={item.get('trace_id') for item in traces}
+        events=[*self.table_data.get('agent-actions',{}).values(),session.get('last_activity') or {}]
+        for event in events:
+            trace_id=event.get('trace_id')
+            if trace_id and trace_id in known:
+                return {'trace_id':trace_id,'span_id':event.get('span_id')}
+        session_id=session.get('session_id')
+        if session_id:
+            match=next((item for item in traces if item.get('session_id')==session_id),None)
+            if match:return {'trace_id':match['trace_id']}
+        task=str(session.get('task') or '').strip().casefold()
+        if task:
+            match=next((item for item in traces if task and task in str(item.get('task') or '').casefold()),None)
+            if match:return {'trace_id':match['trace_id']}
+        return None
+
     def action_open_trace(self):
         page=self.query_one('#pages',TabbedContent).active
         if page=='metrics':
@@ -1897,6 +1924,8 @@ class ObservatoryApp(App):
                 for exemplar in ((point.get('data') or {}).get('exemplars') or [])
                 if exemplar.get('trace_id')),None)
             item={'trace_id':exemplar.get('trace_id'),'span_id':exemplar.get('span_id')} if exemplar else None
+        elif page=='agents':
+            item=self.linked_agent_trace()
         elif page in {'activity','mcp','findings'}:
             item=(self.table_data.get('mcp-table',{}).get(self.selected_mcp) if page=='mcp' else
                   self.table_data.get('activity-table',{}).get(self.selected_activity) if page=='activity' else
@@ -1907,7 +1936,7 @@ class ObservatoryApp(App):
                 item={**item,'span_id':span_id}
         else:return
         if not item or not item.get('trace_id'):
-            self.notify('This action has no linked trace.');return
+            self.notify('No linked trace for this selection.');return
         self.remember_location()
         self.jump_span=item.get('span_id')
         self.feed.selected_span_id=self.jump_span

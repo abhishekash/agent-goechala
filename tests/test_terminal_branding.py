@@ -3,7 +3,7 @@ import unittest
 
 from rich.cells import cell_len
 
-from observatory.branding import masthead, tower_mark
+from observatory.branding import NAME, TAGLINE, masthead
 from observatory.terminal_ui import ObservatoryApp
 from observatory.themes import PALETTES
 from tests.test_terminal_search import ManualFeed
@@ -21,9 +21,38 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('Agenturm', rendered)
                 self.assertNotIn('♜', rendered)
                 self.assertEqual(brand.content_size.height, 1)
-                tower = app.query_one('#tower')
-                self.assertLessEqual(tower.region.right, brand.region.x)
-                self.assertEqual(tower.size.height, 1 if size[1] < 36 else 5)
+                self.assertTrue(app.query_one('#masthead').region.contains_region(brand.region))
+                self.assertLessEqual(app.query_one('#brand-lockup').region.right,
+                                     app.query_one('#connection').region.x)
+                if size[0] >= 100 and size[1] >= 36:
+                    self.assertIn(TAGLINE, rendered)
+
+    async def test_header_stays_two_rows_tall(self):
+        app = ObservatoryApp(ManualFeed())
+        async with app.run_test(size=(160, 48)) as pilot:
+            for size in ((160, 48), (120, 40), (80, 24)):
+                await pilot.resize_terminal(*size)
+                await pilot.pause()
+                masthead = app.query_one('#masthead')
+                self.assertLessEqual(masthead.size.height, 2 if size[1] >= 36 else 1)
+                self.assertEqual(app.query_one('#brand').size.height, 1)
+
+    async def test_shortcut_hints_sit_next_to_the_scope(self):
+        app = ObservatoryApp(ManualFeed())
+        async with app.run_test(size=(160, 48)) as pilot:
+            for size in ((160, 48), (140, 48), (120, 40), (80, 24)):
+                await pilot.resize_terminal(*size)
+                await pilot.pause()
+                hints = app.query_one('#shortcuts')
+                scope = app.query_one('#scope')
+                if size[0] >= 140:
+                    self.assertTrue(hints.display, f'{size}: hints should be visible')
+                    self.assertLessEqual(scope.region.right, hints.region.x)
+                    rendered = hints.render_line(0).text
+                    for label in ('search', 'expand', 'trace', 'copy', 'quit'):
+                        self.assertIn(label, rendered)
+                else:
+                    self.assertFalse(hints.display, f'{size}: hints should be hidden')
 
     async def test_masthead_lockup_is_centered(self):
         app = ObservatoryApp(ManualFeed())
@@ -69,6 +98,9 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('All agent sessions', scope_label.render_line(0).text)
                 self.assertFalse(app.query_one('#history-back').display)
                 self.assertIn('127.0.0.1:4318', app.query_one('#connection').tooltip)
+                table = app.query_one('#agent-table')
+                visible = table.region.intersection(app.query_one('#results-agents').content_region)
+                self.assertGreaterEqual(visible.height, 3, f'{size}: session rows must remain visible')
 
     def test_masthead_is_one_line_even_in_demo_mode(self):
         for compact in (False, True):
@@ -77,27 +109,24 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('Agenturm', label)
                 self.assertNotIn('\n', label)
 
-    async def test_tower_colors_follow_the_terminal_background(self):
+    async def test_wordmark_colors_follow_the_theme(self):
         app = ObservatoryApp(ManualFeed())
-        async with app.run_test(size=(120, 40)) as pilot:
-            for size in ((120, 40), (80, 24)):
+        async with app.run_test(size=(160, 48)) as pilot:
+            for size in ((160, 48), (80, 24)):
                 await pilot.resize_terminal(*size)
                 for name, colors in PALETTES.items():
                     app.theme = name
                     await pilot.pause()
-                    tower = app.query_one('#tower')
-                    row, glyph = (0, '●') if size[1] < 36 else (1, '▗')
-                    segment = next(segment for segment in tower.render_line(row)
-                                   if glyph in segment.text)
-                    self.assertEqual(segment.style.color.get_truecolor().hex, colors['secondary'])
-                    self.assertEqual(segment.style.bgcolor.get_truecolor().hex, colors['canvas'])
-                    if size[1] >= 36:
-                        lens = next(segment for segment in tower.render_line(1)
-                                    if '⌕' in segment.text)
-                        self.assertEqual(lens.style.color.get_truecolor().hex, colors['canvas'])
-                        self.assertEqual(lens.style.bgcolor.get_truecolor().hex, colors['secondary'])
+                    brand = app.query_one('#brand')
+                    name_segment = next(segment for segment in brand.render_line(0)
+                                        if 'Agenturm' in segment.text)
+                    self.assertEqual(name_segment.style.color.get_truecolor().hex, colors['text'])
+                    if size[0] >= 100 and size[1] >= 36:
+                        tagline = next(segment for segment in brand.render_line(0)
+                                       if TAGLINE in segment.text)
+                        self.assertEqual(tagline.style.color.get_truecolor().hex, colors['muted'])
 
-    def test_tower_has_sufficient_contrast_in_every_theme(self):
+    def test_palette_has_sufficient_contrast_in_every_theme(self):
         def luminance(color):
             channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
             linear = [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
@@ -105,11 +134,11 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
             return sum(value * weight for value, weight in zip(linear, (.2126, .7152, .0722)))
 
         for name, colors in PALETTES.items():
-            for role in ('secondary', 'primary'):
+            for role in ('text', 'muted', 'secondary', 'primary'):
                 with self.subTest(theme=name, role=role):
                     values = sorted((luminance(colors[role]), luminance(colors['canvas'])))
                     self.assertGreaterEqual((values[1] + .05) / (values[0] + .05), 4.5)
 
-    def test_tower_is_bounded_standard_terminal_text(self):
-        self.assertEqual([cell_len(row) for row in tower_mark().plain.splitlines()], [5] * 5)
-        self.assertLessEqual(cell_len(tower_mark(compact=True).plain), 5)
+    def test_wordmark_is_bounded_standard_terminal_text(self):
+        self.assertEqual(masthead().plain.splitlines(), [f'{NAME}  │  {TAGLINE}'])
+        self.assertEqual(masthead(compact=True).plain, NAME)

@@ -171,6 +171,38 @@ class PointerCopyTest(unittest.IsolatedAsyncioTestCase):
             log.clear();log.write('replacement')
             self.assertIsNone(app.screen.get_selected_text())
 
+    async def test_trace_key_follows_the_selected_session_from_the_agents_page(self):
+        feed=ManualFeed()
+        app=ObservatoryApp(feed)
+        async with app.run_test(size=(160,48)) as pilot:
+            await pilot.pause()
+            app.action_page('agents')
+            await pilot.pause()
+            self.assertEqual(app.query_one('#pages',TabbedContent).active,'agents')
+            await pilot.press('t')
+            await pilot.pause()
+            self.assertEqual(app.query_one('#pages',TabbedContent).active,'traces')
+            self.assertEqual(feed.selected_trace,'trace-1')
+            await pilot.press('escape')
+            await pilot.pause()
+            self.assertEqual(app.query_one('#pages',TabbedContent).active,'agents')
+
+    async def test_trace_key_reports_when_a_session_has_no_linked_trace(self):
+        feed=ManualFeed()
+        feed.api.traces=[]
+        feed.api.sessions=[{'source_id':'source-9','session_id':'session-9','service':'codex',
+                            'runtime':'Codex','task':'Unrelated work','project':'other','model':'model-x'}]
+        feed.refresh()
+        app=ObservatoryApp(feed)
+        async with app.run_test(size=(160,48)) as pilot:
+            await pilot.pause()
+            app.action_page('agents')
+            await pilot.pause()
+            await pilot.press('t')
+            await pilot.pause()
+            self.assertEqual(app.query_one('#pages',TabbedContent).active,'agents')
+            self.assertTrue(app._notifications)
+
     async def test_trace_back_preserves_event_and_scroll_during_new_arrivals(self):
         feed=ManualFeed()
         base=feed.api.activity[0]

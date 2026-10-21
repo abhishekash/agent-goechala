@@ -92,8 +92,8 @@ pretending it can approve on the agent's behalf.
 
 Press **Ctrl+P**, choose **Theme**, then select **Current** (Alpine Ember),
 **Bright**, **Dark**, or **Solarized**. Each palette applies to the panels,
-tables, controls, and evidence inspectors; Current is the default. The tower-and-lens
-mark adapts to each theme, including light backgrounds.
+tables, controls, and evidence inspectors; Current is the default. The terminal's
+wordmark and tagline adapt to each theme, including light backgrounds.
 
 In **Activity**, use **Prompts** to read the prompt sequence for the selected
 agent. Search, session scope, and selection help keep other sessions out of the
