@@ -30,7 +30,9 @@ def masthead(demo=False, compact=False):
     """Keep the wordmark on one line; the tower has its own bounded widget."""
     text = Text("Agenturm", style=f"bold {FROST}")
     if not compact:
-        text.append("  /  AGENT MONITOR", style=f"not bold {MUTED}")
+        text.append("  │  ", style=MUTED)
+        text.append("A CLEAR VIEW OF EVERY AGENT", style=f"not bold {MUTED}")
     if demo:
-        text.append("  /  DEMO", style=AMBER)
+        text.append("   ", style=MUTED)
+        text.append(" DEMO ", style=f"bold #121018 on {AMBER}")
     return text
