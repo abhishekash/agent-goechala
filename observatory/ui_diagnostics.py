@@ -17,7 +17,7 @@ Deleted content can remain in SQLite free pages and backups. Native source
 logs are separate and are not deleted by pruning telemetry.'''
 
 FIRST_RUN = '''FIND YOUR FIRST SESSION
-Start or continue Codex, Claude Code, or OpenCode in its own terminal, then
+Start or continue Codex, Claude Code, OpenCode, or Pi in its own terminal, then
 return here. Discovery normally looks back 24 hours; Reviews are hidden.
 If no session appears, check Diagnostics for read errors and source coverage.
 For SDK/OTLP agents, point the producer at your local receiver using the
@@ -41,6 +41,10 @@ def diagnostics_text(local):
         seen.add(path)
         lines.extend(['', str(path),
                       f"Last successful read (Unix ns): {record.get('last_success_ns') or 'not reported'}",
+                      f"Last source write (Unix ns): {record.get('source_mtime_ns') or 'not reported'} · bytes read / size: {record.get('bytes_read', 'not reported')} / {record.get('source_size_bytes', 'not reported')}",
+                      f"Last poll: {record.get('records_last_poll', 'not reported')} records · {record.get('spans_last_poll', 'not reported')} spans · {record.get('logs_last_poll', 'not reported')} activity events",
+                      f"Since monitor start: {record.get('bytes_read_total', 'not reported')} bytes · {record.get('records_total', 'not reported')} records · {record.get('spans_total', 'not reported')} spans · {record.get('logs_total', 'not reported')} activity events",
+                      f"OpenCode sessions: {record.get('sessions_last_poll', 'not reported')} · latest session update (Unix ns): {record.get('latest_session_update_ns', 'not reported')} · payload bytes last poll: {record.get('payload_bytes_last_poll', 'not reported')}",
                       f"Backlog bytes: {record.get('backlog_bytes', 'not reported')} · skipped oversized: {record.get('skipped_oversized_records', 'not reported')}",
                       f"Schema errors: {record.get('schema_errors', 'not reported')} · skipped records: {record.get('skipped_records', 'not reported')}"])
     if not seen:

@@ -38,7 +38,7 @@ def snapshot():
         pass
     if not result["process_inventory_available"]:
         return result
-    allowed = {"codex", "claude", "claude-code", "opencode", "gemini", "ollama", "cursor"}
+    allowed = {"codex", "claude", "claude-code", "opencode", "pi", "gemini", "ollama", "cursor"}
     for proc in Path('/proc').iterdir():
         if not proc.name.isdigit():
             continue

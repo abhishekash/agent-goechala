@@ -250,3 +250,47 @@ def claude_activity(session, row, stamp):
         out.append(emit(session, row, stamp, "context", str(row.get("subtype") or "event"), "Session event",
                         {key:row[key] for key in ("durationMs", "messageCount", "isMeta") if key in row}))
     return [entry for entry in out if entry]
+
+
+def pi_activity(session, row, stamp):
+    """Extract bounded activity from Pi's append-only session records."""
+    message = row.get("message") or {}
+    if row.get("type") != "message" or not isinstance(message, dict):
+        return []
+    role = message.get("role")
+    out = []
+    if role == "user":
+        text = plaintext(message.get("content")) if session.capture_details else ""
+        if text:
+            session.tasks[session.turn] = text[:4000]
+        out.append(emit(session, row, stamp, "message", "user",
+                        text.splitlines()[0][:300] if text else "user message", text,
+                        "observed", {"message.role": "user"}, turn=session.turn))
+    elif role == "assistant":
+        for block in message.get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "toolCall":
+                continue
+            call_id = str(block.get("id") or "")
+            name = str(block.get("name") or "Tool")
+            if not call_id:
+                continue
+            session.calls[call_id] = (name, stamp, session.turn)
+            session.tool_inputs[call_id] = (name, "", session.turn)
+            out.append(emit(session, row, stamp, "tool", "call", name,
+                            block.get("arguments") if session.capture_details else "",
+                            "started", {"tool.name": name}, call_id=call_id, turn=session.turn))
+    elif role == "toolResult":
+        call_id = str(message.get("toolCallId") or "")
+        name = str(message.get("toolName") or "Tool")
+        pending = session.calls.get(call_id)
+        start = pending[1] if pending else stamp
+        turn = pending[2] if pending else session.turn
+        failed = bool(message.get("isError"))
+        detail = plaintext(message.get("content")) if session.capture_details else ""
+        out.append(emit(session, row, stamp, "tool", "result", name, detail,
+                        "error" if failed else "success", {"tool.name": name},
+                        call_id=call_id or None, turn=turn))
+    if role == "assistant" and isinstance(message.get("usage"), dict):
+        out.append(emit(session, row, stamp, "model", "usage", session.model or "Model not reported",
+                        message["usage"], "reported", {"gen_ai.request.model": session.model or "unknown"}))
+    return [entry for entry in out if entry]

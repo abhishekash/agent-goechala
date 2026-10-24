@@ -114,6 +114,53 @@ class OpenCodeReaderTests(unittest.TestCase):
         self.assertEqual(reader.omitted_sessions, 2)
         self.assertEqual(len(reader.status_sessions()), 50)
 
+    def test_discovers_recent_session_messages_when_session_and_legacy_message_are_stale(self):
+        now_ms = time.time_ns() // 1_000_000
+        old_ms = now_ms - 5 * 24 * 60 * 60 * 1000
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('UPDATE session SET time_updated=? WHERE id=?', (old_ms, 'ses_test'))
+            db.execute('UPDATE message SET time_created=?,time_updated=? WHERE id=?',
+                       (old_ms, old_ms, 'msg_test'))
+            db.execute('''CREATE TABLE session_message(
+                id TEXT PRIMARY KEY, session_id TEXT, type TEXT,
+                time_created INTEGER, time_updated INTEGER, data TEXT)''')
+            db.execute('INSERT INTO session_message VALUES(?,?,?,?,?,?)', (
+                'msg_new', 'ses_test', 'assistant', now_ms, now_ms,
+                json.dumps({'role': 'assistant', 'modelID': 'model-new',
+                            'time': {'created': now_ms, 'completed': now_ms}})))
+        reader = OpenCodeReader(self.store, path=self.database)
+        self.assertGreater(reader.poll(), 0)
+        self.assertEqual(reader.discovered_sessions, 1)
+        self.assertEqual(len(reader.status_sessions()), 1)
+        self.assertEqual(reader.sessions[0]['session_id'], 'ses_test')
+        self.assertEqual(reader.sessions[0]['task'], 'Fix the MCP integration')
+        with closing(sqlite3.connect(self.store.path)) as db:
+            names = {row[0] for row in db.execute('SELECT name FROM spans')}
+        self.assertIn('agent.run', names)
+
+    def test_discovers_orphan_session_messages_and_inline_tools_from_current_schema(self):
+        now_ms = time.time_ns() // 1_000_000
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('''CREATE TABLE session_message(
+                id TEXT PRIMARY KEY, session_id TEXT, type TEXT,
+                seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT)''')
+            db.execute('INSERT INTO session_message VALUES(?,?,?,?,?,?,?)', (
+                'orphan-message', 'orphan-session', 'assistant', 1, now_ms, now_ms,
+                json.dumps({'model': {'id': 'model-new', 'providerID': 'provider-new'},
+                    'time': {'created': now_ms, 'streamed': now_ms},
+                    'content': [{'type': 'tool', 'id': 'inline-tool', 'name': 'Read',
+                        'state': {'status': 'completed', 'input': {'path': 'README.md'}, 'output': 'ok'}}]})))
+        reader = OpenCodeReader(self.store, path=self.database)
+        self.assertGreater(reader.poll(), 0)
+        orphan = next(item for item in reader.status_sessions() if item['session_id'] == 'orphan-session')
+        self.assertEqual(orphan['runtime'], 'OpenCode')
+        self.assertEqual(orphan['run_state'], 'running')
+        with closing(sqlite3.connect(self.store.path)) as db:
+            rows = db.execute("SELECT name,attributes FROM spans WHERE service='opencode'").fetchall()
+        self.assertIn('Read', {row[0] for row in rows})
+        model = next(json.loads(row[1]) for row in rows if row[0] == 'chat model-new')
+        self.assertEqual(model['gen_ai.provider.name'], 'provider-new')
+
     def test_metadata_only_keeps_tool_identity_but_omits_payload_and_task(self):
         reader = OpenCodeReader(self.store, capture_details=False, path=self.database)
         reader.poll()
@@ -237,6 +284,12 @@ class OpenCodeReaderTests(unittest.TestCase):
         reader.poll()
         with closing(sqlite3.connect(self.database)) as db, db:
             db.execute('DELETE FROM session')
+        reader.poll()
+        self.assertEqual(len(reader._message_revisions), 1)
+        self.assertEqual(len(reader.sessions), 1)  # recent orphan messages remain discoverable
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('DELETE FROM message')
+            db.execute('DELETE FROM part')
         reader.poll()
         self.assertEqual(reader._message_revisions, {})
         self.assertEqual(reader._progress_revisions, {})

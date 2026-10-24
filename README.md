@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A clear view of every agent.</strong><br>
-  A local terminal monitor for Codex, Claude Code, OpenCode, and OpenTelemetry agents.
+  A local terminal monitor for Codex, Claude Code, OpenCode, Pi, and OpenTelemetry agents.
 </p>
 
 <p align="center">
@@ -54,7 +54,7 @@ uv tool install --force git+https://github.com/abhishekash/agenturm
 agenturm
 ```
 
-Open it wherever you work. Supported local Codex, Claude Code, and OpenCode
+Open it wherever you work. Supported local Codex, Claude Code, OpenCode, and Pi
 session records are discovered automatically. **No browser, account, or API key
 is needed for local monitoring and recorded-progress summaries.**
 

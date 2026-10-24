@@ -9,6 +9,20 @@ from tests.test_terminal_search import ManualFeed
 
 
 class SessionViewTests(unittest.IsolatedAsyncioTestCase):
+    def test_native_opencode_and_pi_status_sessions_are_agent_rows(self):
+        feed = ManualFeed()
+        now = time.time_ns()
+        for runtime, sid in (("OpenCode", "opencode-session"), ("Pi", "pi-session")):
+            feed.snapshot.local_status['sessions'].append({
+                'source_id': f'{runtime.lower()}-source', 'runtime': runtime,
+                'service': runtime.lower(), 'session_id': sid, 'project': 'project',
+                'task': 'Task', 'run_state': 'running',
+                'last_activity': {'time_unix_nano': now}, 'capture_content': False,
+            })
+        rows = sources(feed.snapshot)
+        for runtime, sid in (("OpenCode", "opencode-session"), ("Pi", "pi-session")):
+            self.assertTrue(any(item['runtime'] == runtime and item['session_id'] == sid for item in rows))
+
     async def test_tasks_get_spare_width_and_wrap_without_expanding_missing_rows(self):
         feed=ManualFeed()
         task=('Investigate the checkout regression and improve keyboard navigation '

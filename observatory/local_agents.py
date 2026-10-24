@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .core import normalize_native
-from .local_activity import mcp_attributes, mcp_failed
+from .local_activity import mcp_attributes, mcp_failed, plaintext
 from .local_state import RecentMap
 from .native_json import loads
 
@@ -225,6 +225,7 @@ class Session:
         self.discarding_line = False
         self.turn = "session"
         self.model = None
+        self.provider = None
         self.project = ""
         self.working_directory = ""
         self.branch = ""
@@ -247,6 +248,15 @@ class Session:
         self.backlog_bytes = 0
         self.schema_errors = 0
         self.skipped_oversized = 0
+        self.source_size_bytes = 0
+        self.source_mtime_ns = 0
+        self.records_last_poll = 0
+        self.spans_last_poll = 0
+        self.logs_last_poll = 0
+        self.bytes_read_total = 0
+        self.records_total = 0
+        self.spans_total = 0
+        self.logs_total = 0
 
     def finish_turn(self):
         # Roots and model usage are durable in Store. Keep only the current
@@ -265,6 +275,12 @@ class Session:
     def diagnostics(self):
         return {"source_path": str(self.path), "last_success_ns": self.last_success_ns,
                 "backlog_bytes": self.backlog_bytes, "skipped_records": self.skipped,
+                "source_size_bytes": self.source_size_bytes, "source_mtime_ns": self.source_mtime_ns,
+                "records_last_poll": self.records_last_poll,
+                "spans_last_poll": self.spans_last_poll, "logs_last_poll": self.logs_last_poll,
+                "bytes_read_total": self.bytes_read_total, "records_total": self.records_total,
+                "spans_total": self.spans_total, "logs_total": self.logs_total,
+                "bytes_read": self.offset,
                 "skipped_oversized_records": self.skipped_oversized,
                 "schema_errors": self.schema_errors,
                 "cache_evictions": sum(mapping.evictions for mapping in
@@ -309,6 +325,26 @@ class Session:
                     self.pending_tools.pop(key, None)
                     state = "running"
                     self.waiting_for = ""
+        elif self.runtime == "Pi":
+            message = row.get("message") or {}
+            if not isinstance(message, dict):
+                return
+            role = message.get("role")
+            if role == "user":
+                state = "running"
+                self.pending_tools.clear()
+            elif role == "assistant":
+                for block in message.get("content") or []:
+                    if isinstance(block, dict) and block.get("type") == "toolCall":
+                        self.pending_tools[str(block.get("id") or "")] = str(block.get("name") or "Tool")
+                if message.get("stopReason") == "stop":
+                    state = "completed"
+                    self.pending_tools.clear()
+                else:
+                    state = "running"
+            elif role == "toolResult":
+                self.pending_tools.pop(str(message.get("toolCallId") or ""), None)
+                state = "running"
         else:
             message = row.get("message") or {}
             if not isinstance(message, dict):
@@ -399,6 +435,75 @@ class Session:
         if claude:
             attrs["observatory.native_usage"] = {field: count(usage.get(field)) for field in CLAUDE_USAGE_FIELDS}
         return self.span(key, self.runtime + " · " + str(self.model or "model call")[:200], stamp, attrs)
+
+    def pi(self, row, stamp):
+        kind = row.get("type")
+        if kind == "session":
+            self.session_id = str(row.get("id") or self.session_id)
+            cwd = row.get("cwd")
+            if cwd:
+                self.project = Path(cwd).name
+                self.working_directory = str(cwd) if self.capture_details else ""
+            return []
+        if kind == "model_change":
+            self.model = row.get("modelId") or self.model
+            self.provider = row.get("provider") or self.provider
+            return []
+        if kind != "message":
+            return []
+        message = row.get("message") or {}
+        if not isinstance(message, dict):
+            return []
+        role = message.get("role")
+        if role == "user":
+            self.turn = str(row.get("id") or stamp or self.turn)
+            self.started[self.turn] = stamp
+            text = plaintext(message.get("content")) if self.capture_details else ""
+            if text:
+                self.tasks[self.turn] = text[:4000]
+            return [self.root(stamp, "running")]
+        if role == "assistant":
+            self.model = message.get("model") or self.model
+            self.provider = message.get("provider") or self.provider
+            result = []
+            usage = message.get("usage")
+            if isinstance(usage, dict):
+                usage_fields = {
+                    "input": "input_tokens", "output": "output_tokens",
+                    "cacheRead": "cache_read_input_tokens", "cacheWrite": "cache_write_input_tokens",
+                    "reasoning": "reasoning_tokens",
+                }
+                normalized = {target: usage[source] for source, target in usage_fields.items()
+                              if source in usage}
+                span = self.model_span(("pi-model", row.get("id") or stamp), normalized, stamp)
+                if span:
+                    span["attributes"]["gen_ai.provider.name"] = str(self.provider or "unknown")[:128]
+                    result.append(span)
+            for block in message.get("content") or []:
+                if not isinstance(block, dict) or block.get("type") != "toolCall":
+                    continue
+                call_id = str(block.get("id") or "")
+                name = str(block.get("name") or "Tool")
+                if call_id:
+                    self.calls[call_id] = (name, stamp, self.turn)
+            if message.get("stopReason") == "stop":
+                result.append(self.root(stamp, "completed"))
+            elif message.get("stopReason") == "error":
+                result.append(self.root(stamp, "interrupted"))
+            return result
+        if role == "toolResult":
+            call_id = str(message.get("toolCallId") or "")
+            pending = self.calls.pop(call_id, None)
+            name = str(message.get("toolName") or (pending[0] if pending else "Tool"))
+            start = pending[1] if pending else stamp
+            turn = pending[2] if pending else self.turn
+            previous, self.turn = self.turn, turn
+            span = self.span(("tool", call_id), name, stamp,
+                {"gen_ai.operation.name": "execute_tool", "tool.name": name},
+                start=start, error=bool(message.get("isError")))
+            self.turn = previous
+            return [span] if span else []
+        return []
 
     def codex(self, row, stamp):
         kind, payload = row.get("type"), row.get("payload") or {}
@@ -539,6 +644,9 @@ class Session:
 
     def poll(self):
         stat = self.path.stat()
+        self.source_size_bytes = stat.st_size
+        self.source_mtime_ns = stat.st_mtime_ns
+        self.records_last_poll = self.spans_last_poll = self.logs_last_poll = 0
         file_id = stat.st_dev, stat.st_ino
         if self.file_id != file_id or stat.st_size < self.offset:
             self.offset, self.pending = 0, b""
@@ -575,6 +683,7 @@ class Session:
             stream.seek(self.offset)
             data = stream.read(MAX_READ)
             self.offset = stream.tell()
+        self.bytes_read_total += len(data)
         self.backlog_bytes = max(0, stat.st_size - self.offset)
         if self.discarding_line:
             _, separator, data = data.partition(b"\n")
@@ -604,6 +713,8 @@ class Session:
                 self.schema_errors += 1
         if self.runtime == "Codex" and any(row.get("type") == "token_usage_record" for row in records):
             self.modern_usage = True
+        self.records_last_poll = len(records)
+        self.records_total += len(records)
         spans = []
         # Poll-local references only (bounded by MAX_READ), discarded on return.
         # Avoid scanning the entire batch for late streaming usage updates.
@@ -613,13 +724,24 @@ class Session:
         for row in records:
             try:
                 stamp = timestamp(row.get("timestamp"))
-                new_spans = self.codex(row, stamp) if self.runtime == "Codex" else self.claude(row, stamp, prior_models)
+                if self.runtime == "Codex":
+                    new_spans = self.codex(row, stamp)
+                elif self.runtime == "Pi":
+                    new_spans = self.pi(row, stamp)
+                else:
+                    new_spans = self.claude(row, stamp, prior_models)
                 for span in new_spans:
                     if span:
                         spans.append(span)
                         if "observatory.native_usage" in span["attributes"]:
                             prior_models[(span["trace_id"], span["span_id"])] = span
-                logs.extend(codex_activity(self, row, stamp) if self.runtime == "Codex" else claude_activity(self, row, stamp))
+                if self.runtime == "Codex":
+                    logs.extend(codex_activity(self, row, stamp))
+                elif self.runtime == "Pi":
+                    from .local_activity import pi_activity
+                    logs.extend(pi_activity(self, row, stamp))
+                else:
+                    logs.extend(claude_activity(self, row, stamp))
                 self.observe_state(row, stamp)
                 if self.capture_details and self.turn in self.tasks and self.turn in self.started:
                     payload = row.get("payload") or {}
@@ -650,6 +772,10 @@ class Session:
                                   "action": last["attributes"].get("agent.activity.action"),
                                   "subject": last["attributes"].get("agent.activity.subject"),
                                   "result": last["attributes"].get("agent.activity.result")}
+        self.spans_last_poll = len(spans)
+        self.logs_last_poll = len(logs)
+        self.spans_total += len(spans)
+        self.logs_total += len(logs)
         self.last_success_ns = time.time_ns()
         state = "running" if time.time() - stat.st_mtime < 35 else "stopped"
         if time.monotonic() - self.last_heartbeat > 10 or state != self.last_state:
@@ -688,7 +814,8 @@ class LocalAgents:
 
     def discover(self):
         roots = [(Path(os.environ.get("CODEX_HOME", str(Path.home()/".codex")))/"sessions", "Codex"),
-                 (Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home()/".claude")))/"projects", "Claude Code")]
+                 (Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home()/".claude")))/"projects", "Claude Code"),
+                 (Path(os.environ.get("PI_CODING_AGENT_DIR", str(Path.home()/".pi"/"agent")))/"sessions", "Pi")]
         cutoff = time.time() - 86400
         self.discovered_sources = 0
         def recent():

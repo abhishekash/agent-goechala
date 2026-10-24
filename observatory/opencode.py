@@ -133,6 +133,9 @@ class OpenCodeReader:
                 "budget_excluded_bytes_last_poll": self.budget_excluded_bytes,
                 "backlog_records": self.backlog_records,
                 "payload_bytes_last_poll": self.payload_bytes,
+                "sessions_last_poll": len(self.sessions),
+                "latest_session_update_ns": max((item.get("last_update_ns", 0)
+                    for item in self.sessions), default=0),
                 "max_payload_bytes": MAX_PAYLOAD_BYTES,
                 "max_poll_payload_bytes": MAX_POLL_PAYLOAD_BYTES}
 
@@ -344,13 +347,87 @@ class OpenCodeReader:
                            if name in session_columns]
                 now_ns = time.time_ns()
                 cutoff_ms = (now_ns - LOOKBACK_NS) // 1_000_000
+                message_table = "message" if "message" in tables else "session_message" if "session_message" in tables else None
+                message_columns = self._columns(db, message_table) if message_table else set()
+                part_columns = self._columns(db, "part") if "part" in tables else set()
+
+                # Current OpenCode keeps appending to session_message while
+                # retaining a stale session.time_updated (and old message rows)
+                # after its storage migration. Discover sessions from recent
+                # message activity as well as the session row timestamp.
+                activity_updates = {}
+                activity_tables = {}
+                for table in ("message", "session_message"):
+                    if table not in tables:
+                        continue
+                    cols = self._columns(db, table)
+                    if "session_id" not in cols or not ({"time_updated", "time_created"} & cols):
+                        continue
+                    time_columns = [name for name in ("time_updated", "time_created") if name in cols]
+                    stamp_expr = (f'COALESCE({",".join(chr(34)+name+chr(34) for name in time_columns)})'
+                                  if len(time_columns) > 1 else f'"{time_columns[0]}"')
+                    recent = db.execute(
+                        f'SELECT "session_id",MAX({stamp_expr}) FROM "{table}" '
+                        f'WHERE {stamp_expr}>=? GROUP BY "session_id"', (cutoff_ms,)).fetchall()
+                    per_table = {str(row[0]): int(row[1] or 0) for row in recent}
+                    activity_tables[table] = per_table
+                    for session_id, stamp in per_table.items():
+                        activity_updates[session_id] = max(activity_updates.get(session_id, 0), stamp)
+
+                # Use SQL-side activity candidates so the result count remains
+                # exact without loading every historic session or message.
+                active_selects = []
+                active_params = []
+                for table, per_table in activity_tables.items():
+                    cols = self._columns(db, table)
+                    time_columns = [name for name in ("time_updated", "time_created") if name in cols]
+                    stamp_expr = (f'COALESCE({",".join(chr(34)+name+chr(34) for name in time_columns)})'
+                                  if len(time_columns) > 1 else f'"{time_columns[0]}"')
+                    active_selects.append(
+                        f'SELECT "session_id",MAX({stamp_expr}) AS activity_ns FROM "{table}" '
+                        f'WHERE {stamp_expr}>=? GROUP BY "session_id"')
+                    active_params.append(cutoff_ms)
+                activity_cte = ('SELECT session_id,MAX(activity_ns) AS activity_ns FROM (' +
+                                ' UNION ALL '.join(active_selects) + ') GROUP BY session_id'
+                                if active_selects else 'SELECT NULL AS session_id,0 AS activity_ns WHERE 0')
+                active_join = f'LEFT JOIN ({activity_cte}) recent ON recent.session_id=s.id'
+                active_where = '(CAST(COALESCE(s.time_updated,0) AS INTEGER)>=? OR recent.session_id IS NOT NULL)'
                 self.discovered_sessions = int(db.execute(
-                    'SELECT COUNT(*) FROM "session" WHERE "time_updated">=?', (cutoff_ms,)
-                ).fetchone()[0])
+                    f'SELECT COUNT(*) FROM "session" s {active_join} WHERE {active_where}',
+                    (*active_params, cutoff_ms)).fetchone()[0])
                 self.omitted_sessions = max(0, self.discovered_sessions - MAX_SESSIONS)
-                expressions = [f'substr("{name}",1,4096) AS "{name}"' if name in {"title", "directory", "agent", "model"} else f'"{name}"' for name in columns]
-                sql = f'SELECT {",".join(expressions)} FROM "session" WHERE "time_updated">=? ORDER BY "time_updated" DESC LIMIT ?'
-                rows = db.execute(sql, (cutoff_ms, MAX_SESSIONS)).fetchall()
+                expressions = [f'substr(s."{name}",1,4096) AS "{name}"' if name in {"title", "directory", "agent", "model"} else f's."{name}"' for name in columns]
+                expressions.append('MAX(CAST(COALESCE(s.time_updated,0) AS INTEGER),COALESCE(recent.activity_ns,0)) AS _last_activity_ns')
+                sql = (f'SELECT {",".join(expressions)} FROM "session" s {active_join} '
+                       f'WHERE {active_where} ORDER BY _last_activity_ns DESC,s.id LIMIT ?')
+                rows = db.execute(sql, (*active_params, cutoff_ms, MAX_SESSIONS)).fetchall()
+                # Newer OpenCode builds can retain recent session_message rows
+                # after the corresponding session row has been removed (for
+                # example, detached/subagent conversations). Preserve those
+                # as metadata-only session entries rather than silently
+                # dropping otherwise active work.
+                activity_ids = set(activity_updates)
+                existing_activity_ids = set()
+                activity_id_list = sorted(activity_ids)
+                for offset in range(0, len(activity_id_list), 500):
+                    batch = activity_id_list[offset:offset + 500]
+                    if not batch:
+                        continue
+                    marks = ",".join("?" for _ in batch)
+                    existing_activity_ids.update(str(row[0]) for row in db.execute(
+                        f'SELECT "id" FROM "session" WHERE "id" IN ({marks})', batch))
+                orphan_ids = activity_ids - existing_activity_ids
+                self.discovered_sessions += len(orphan_ids)
+                self.omitted_sessions = max(0, self.discovered_sessions - MAX_SESSIONS)
+                rows = list(rows)
+                for session_id in sorted(orphan_ids, key=lambda key: activity_updates[key], reverse=True)[:MAX_SESSIONS]:
+                    orphan = {name: None for name in columns}
+                    orphan.update({"id": session_id, "time_updated": activity_updates[session_id],
+                                   "title": "", "directory": "", "model": "", "_last_activity_ns": activity_updates[session_id]})
+                    rows.append(orphan)
+                rows.sort(key=lambda row: (-int((dict(row).get("_last_activity_ns") or 0)),
+                                           str(dict(row).get("id") or "")))
+                rows = rows[:MAX_SESSIONS]
                 if rows:
                     start = self._session_cursor % len(rows)
                     rows = rows[start:] + rows[:start]
@@ -365,9 +442,6 @@ class OpenCodeReader:
                         for project_row in db.execute(f'SELECT {",".join(expressions)} FROM "project" WHERE "id" IN ({placeholders})', project_ids):
                             project = dict(project_row)
                             project_names[project["id"]] = project.get("name") or Path(project.get("worktree") or "").name
-                message_table = "message" if "message" in tables else "session_message" if "session_message" in tables else None
-                message_columns = self._columns(db, message_table) if message_table else set()
-                part_columns = self._columns(db, "part") if "part" in tables else set()
                 if message_table and not {"id", "session_id", "data"} <= message_columns:
                     self.schema_errors += 1
                 if "part" in tables and not {"id", "session_id", "message_id", "data"} <= part_columns:
@@ -377,7 +451,7 @@ class OpenCodeReader:
                     session_id = str(data["id"])
                     directory = str(data.get("directory") or "")
                     project = project_names.get(data.get("project_id")) or Path(directory).name or ""
-                    updated = timestamp(data.get("time_updated"))
+                    updated = timestamp(data.get("_last_activity_ns", data.get("time_updated")))
                     item = {"source_id": identity(self.source_id, session_id), "runtime": "OpenCode",
                             "service": "opencode", "session_id": session_id, "project": project,
                             "working_directory": directory if self.capture_details else "",
@@ -389,7 +463,13 @@ class OpenCodeReader:
                                               "action": "session update", "subject": project or "OpenCode session",
                                               "result": "observed"}, "bytes_read": 0}
                     sessions.append(item)
-                    read_table, read_columns = message_table, message_columns
+                    # Prefer the message table that actually has the latest
+                    # records for this session. Old databases may retain both
+                    # tables after migration; existence alone is not enough.
+                    table_candidates = [(updates.get(session_id, 0), name)
+                                        for name, updates in activity_tables.items()]
+                    read_table = max(table_candidates, default=(0, message_table))[1]
+                    read_columns = self._columns(db, read_table) if read_table else set()
                     if not read_table or not {"id", "session_id", "data"} <= read_columns:
                         continue
                     msg_fields = [name for name in ("id", "session_id", "type", "time_created", "time_updated", "data") if name in read_columns]
@@ -463,7 +543,9 @@ class OpenCodeReader:
                         message_created = message["time_created"] if "time_created" in message.keys() else 0
                         message_updated = message["time_updated"] if "time_updated" in message.keys() else message_created
                         start_ns = _first_timestamp((message_data.get("time") or {}).get("created"), message_created)
-                        end_ns = _first_timestamp((message_data.get("time") or {}).get("completed"), message_updated, message_created)
+                        end_ns = _first_timestamp((message_data.get("time") or {}).get("completed"),
+                                                  (message_data.get("time") or {}).get("streamed"),
+                                                  message_updated, message_created)
                         if not start_ns:
                             start_ns = end_ns
                         if end_ns < start_ns:
@@ -482,12 +564,13 @@ class OpenCodeReader:
                             "scope_name": "observatory.opencode"}, "opencode")
                         if message_changed:
                             accepted.append(root)
-                        model = _model(message_data.get("modelID") or data.get("model"))
+                        model = _model(message_data.get("modelID") or message_data.get("model") or data.get("model"))
                         tokens = message_data.get("tokens") if isinstance(message_data.get("tokens"), dict) else {}
                         model_id = None
                         if model or tokens:
+                            model_data = message_data.get("model") if isinstance(message_data.get("model"), dict) else {}
                             model_attrs = {"session.id": session_id, "gen_ai.operation.name": "chat",
-                                           "gen_ai.provider.name": str(message_data.get("providerID") or "unknown"),
+                                           "gen_ai.provider.name": str(message_data.get("providerID") or model_data.get("providerID") or "unknown"),
                                            "gen_ai.request.model": model or "Not reported"}
                             for source, target in (("input", "gen_ai.usage.input_tokens"),
                                 ("output", "gen_ai.usage.output_tokens"), ("reasoning", "gen_ai.usage.reasoning_tokens"),
@@ -512,6 +595,25 @@ class OpenCodeReader:
                                 "scope_name": "observatory.opencode"}, "opencode")
                             if message_changed:
                                 accepted.append(model_span)
+                        # New OpenCode session_message records carry tool
+                        # blocks inline instead of referencing rows in part.
+                        known_part_ids = {str(part_id) for part_id, _ in parts}
+                        content = message_data.get("content")
+                        if isinstance(content, list):
+                            for index, block in enumerate(content[:MAX_PARTS_PER_MESSAGE]):
+                                if not isinstance(block, dict) or block.get("type") != "tool":
+                                    continue
+                                inline_id = str(block.get("id") or f'{message_id}:tool:{index}')
+                                if inline_id in known_part_ids:
+                                    continue
+                                inline_state = dict(block.get("state") or {})
+                                if "output" not in inline_state and "content" in inline_state:
+                                    inline_state["output"] = inline_state["content"]
+                                inline = {"type": "tool", "tool": block.get("name") or "tool",
+                                          "state": inline_state,
+                                          "metadata": block.get("providerState") or {}}
+                                parts.append((inline_id, json.dumps(inline, ensure_ascii=False)))
+                                part_stamps[inline_id] = None
                         for part in parts:
                             part_id, raw_part = part
                             stamp = part_stamps[str(part_id)]

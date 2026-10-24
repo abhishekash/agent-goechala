@@ -119,11 +119,27 @@ class NativeSessionTests(unittest.TestCase):
             (session_root / f'{index:03}.jsonl').touch()
         agents = LocalAgents(self.store)
         with patch.dict(os.environ, {'CODEX_HOME': str(codex_home),
-                                     'CLAUDE_CONFIG_DIR': str(self.root / 'claude-home')}):
+                                     'CLAUDE_CONFIG_DIR': str(self.root / 'claude-home'),
+                                     'PI_CODING_AGENT_DIR': str(self.root / 'pi-home')}):
             agents.discover()
         self.assertEqual(agents.discovered_sources, 52)
         self.assertEqual(agents.omitted_sources, 2)
         self.assertEqual(len(agents.sessions), 50)
+
+    def test_local_discovery_includes_recent_pi_sessions(self):
+        pi_home = self.root / 'pi-home'
+        session_root = pi_home / 'sessions' / 'project'
+        session_root.mkdir(parents=True)
+        session_file = session_root / '2026-10-24T12-00-00Z_pi-session.jsonl'
+        session_file.write_text(json.dumps({'type': 'session', 'id': 'pi-session',
+                                            'cwd': '/work/pi-demo'}) + '\n')
+        agents = LocalAgents(self.store)
+        with patch.dict(os.environ, {'CODEX_HOME': str(self.root / 'codex-home'),
+                                     'CLAUDE_CONFIG_DIR': str(self.root / 'claude-home'),
+                                     'PI_CODING_AGENT_DIR': str(pi_home)}):
+            agents.discover()
+        self.assertEqual(agents.discovered_sources, 1)
+        self.assertEqual([session.runtime for session in agents.sessions.values()], ['Pi'])
 
     def append(self, session, *rows):
         with session.path.open("a") as stream:
@@ -152,6 +168,58 @@ class NativeSessionTests(unittest.TestCase):
         self.assertEqual(claude_attrs["gen_ai.usage.cache_read.input_tokens"], 20)
         self.assertEqual(claude_attrs["gen_ai.usage.cache_write.input_tokens"], 5)
         self.assertEqual(claude_attrs["gen_ai.usage.reasoning_tokens"], 3)
+
+    def test_diagnostics_distinguish_successful_empty_poll_from_captured_events(self):
+        session = self.session("Codex")
+        self.append(session, self.codex({"type": "task_started"}, 1, "event_msg"))
+        diag = session.diagnostics()
+        self.assertEqual(diag["records_last_poll"], 1)
+        self.assertEqual(diag["spans_last_poll"], 1)
+        self.assertEqual(diag["logs_last_poll"], 1)
+        self.assertEqual(diag["records_total"], 1)
+        self.assertEqual(diag["spans_total"], 1)
+        self.assertEqual(diag["logs_total"], 1)
+        self.assertEqual(diag["source_size_bytes"], diag["bytes_read"])
+        session.poll()
+        self.assertEqual(session.diagnostics()["records_last_poll"], 0)
+        self.assertEqual(session.diagnostics()["records_total"], 1)
+
+    def test_pi_session_messages_emit_session_model_tool_and_activity_records(self):
+        session = self.session("Pi")
+        rows = [
+            {"type": "session", "version": 3, "id": "pi-session", "cwd": "/work/pi-demo"},
+            {"type": "message", "id": "user-1", "timestamp": "2026-10-24T12:00:00Z",
+             "message": {"role": "user", "content": [{"type": "text", "text": "Inspect the project"}]}},
+            {"type": "message", "id": "assistant-1", "timestamp": "2026-10-24T12:00:01Z",
+             "message": {"role": "assistant", "provider": "test-provider", "model": "test-model",
+                         "stopReason": "toolUse", "usage": {"input": 8, "output": 3, "cacheRead": 2},
+                         "content": [{"type": "toolCall", "id": "call-1", "name": "read",
+                                      "arguments": {"path": "README.md"}}]}},
+            {"type": "message", "id": "tool-1", "timestamp": "2026-10-24T12:00:02Z",
+             "message": {"role": "toolResult", "toolCallId": "call-1", "toolName": "read",
+                         "isError": False, "content": [{"type": "text", "text": "ok"}]}},
+            {"type": "message", "id": "assistant-2", "timestamp": "2026-10-24T12:00:03Z",
+             "message": {"role": "assistant", "provider": "test-provider", "model": "test-model",
+                         "stopReason": "stop", "content": [{"type": "text", "text": "Done"}]}},
+        ]
+        self.append(session, *rows)
+        self.assertEqual(session.session_id, "pi-session")
+        self.assertEqual(session.project, "pi-demo")
+        self.assertEqual(session.run_state, "completed")
+        self.assertEqual(session.tasks.get(session.turn), "Inspect the project")
+        with self.store._connect() as db:
+            spans = db.execute("SELECT name,attributes FROM spans WHERE service='pi'").fetchall()
+            logs = db.execute("SELECT event_name,attributes FROM logs WHERE service='pi'").fetchall()
+        names = {row["name"] for row in spans}
+        self.assertIn("agent.run", names)
+        self.assertIn("read", names)
+        model = next(json.loads(row["attributes"]) for row in spans if row["name"].startswith("Pi ·"))
+        self.assertEqual(model["gen_ai.provider.name"], "test-provider")
+        self.assertEqual(model["gen_ai.usage.input_tokens"], 8)
+        self.assertEqual(model["gen_ai.usage.cache_read.input_tokens"], 2)
+        domains = [json.loads(row["attributes"]).get("agent.activity.domain") for row in logs]
+        self.assertIn("message", domains)
+        self.assertIn("tool", domains)
 
     def claude(self, kind, content, second, **extra):
         return {"type": kind, "timestamp": f"2026-10-15T12:00:{second:02d}Z",
