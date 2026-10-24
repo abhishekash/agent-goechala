@@ -25,9 +25,11 @@ def _json_safe(value):
 
 def _normalize(service, resource, scope, metric, kind, temporality, point, metric_metadata=None):
     timestamp = int(point.get("timeUnixNano") or 0)
-    if timestamp <= 0:
+    if not 0 < timestamp <= 2**63 - 1:
         raise ValueError("metric point requires timeUnixNano")
     start = int(point.get("startTimeUnixNano") or 0)
+    if not 0 <= start <= timestamp:
+        raise ValueError("invalid metric start timestamp")
     value = point.get("asDouble", point.get("asInt"))
     if value is not None:
         value = float(value) if "asDouble" in point else int(value)

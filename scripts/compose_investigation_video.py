@@ -43,13 +43,27 @@ def fitted(source, width, height):
     image.thumbnail((width, height), Image.Resampling.LANCZOS)
     return image
 
+
+def brand_icon(size):
+    """Render the authoritative square SVG, never a potentially stale PNG export.
+
+    Keep the tower's circular deck and transparent cutouts intact at the final
+    display size, without a raster-resize or video-sized intermediate.
+    """
+    return Image.open(BytesIO(cairosvg.svg2png(
+        url=str(ROOT / 'media/brand/icon.svg'),
+        output_width=size, output_height=size,
+    ))).convert('RGBA')
+
 README_WIDTH = 1600
 README_CAPTION = 190
 
 
 def canvas_size(source, layout):
     if layout == 'readme':
-        return README_WIDTH, round(README_WIDTH * source.height / source.width) + README_CAPTION
+        height = round(README_WIDTH * source.height / source.width) + README_CAPTION
+        # H.264 needs even dimensions: pad the canvas, never stretch the logo.
+        return README_WIDTH, height + height % 2
     return WIDTH, HEIGHT
 
 
@@ -91,7 +105,7 @@ def outro(icon, layout='wide', size=(WIDTH, HEIGHT)):
     width, height = size
     frame = Image.new('RGB', (width, height), BG)
     if layout == 'readme':
-        large = Image.open(ROOT/'media/brand/icon-512.png').convert('RGBA').resize((240,240),Image.Resampling.LANCZOS)
+        large = brand_icon(240)
         frame.paste(large, ((width-240)//2, 220), large)
         draw=ImageDraw.Draw(frame)
         def centered(text,y,typeface,fill):
@@ -102,7 +116,7 @@ def outro(icon, layout='wide', size=(WIDTH, HEIGHT)):
         centered('agenturm', 720, font(27,mono=True), GOLD)
         centered('Local agent observability. Right in your terminal.', 830, font(23), MUTED)
         return frame
-    large = Image.open(ROOT/'media/brand/icon-512.png').convert('RGBA').resize((320,320),Image.Resampling.LANCZOS)
+    large = brand_icon(320)
     frame.paste(large, (800,100), large)
     draw=ImageDraw.Draw(frame)
     def centered(text,y,typeface,fill):
@@ -116,7 +130,7 @@ def outro(icon, layout='wide', size=(WIDTH, HEIGHT)):
 
 def encode(captures, output, poster, layout='wide'):
     output.parent.mkdir(parents=True,exist_ok=True)
-    icon=Image.open(ROOT/'media/brand/icon-128.png').convert('RGBA').resize((68,68),Image.Resampling.LANCZOS)
+    icon=brand_icon(68)
     images={scene[0]:raster(captures/f'{scene[0]}.svg') for scene in SCENES}
     size=canvas_size(images[SCENES[0][0]], layout)
     if layout == 'wide':

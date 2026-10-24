@@ -6,7 +6,9 @@ mode omits task text, arguments, and results. Agent log formats vary by version.
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
+import math
 import os
 import platform
 import socket
@@ -18,11 +20,17 @@ from pathlib import Path
 
 from .core import normalize_native
 from .local_activity import mcp_attributes, mcp_failed
+from .local_state import RecentMap
+from .native_json import loads
 
 MAX_READ = 8 * 1024 * 1024
 MAX_LINE = 2 * 1024 * 1024
 MAX_SOURCES = 50
 MAX_CONFIG_BYTES = 1024 * 1024
+MAX_RECENT_TURNS = 64
+MAX_RECENT_CALLS = 512
+MAX_RECENT_USAGE = 256
+CLAUDE_USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
 def identity(*parts, size=32):
@@ -31,13 +39,17 @@ def identity(*parts, size=32):
 
 def timestamp(value):
     if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return 0
         magnitude = abs(value)
         factor = 1 if magnitude >= 1e17 else 1000 if magnitude >= 1e14 else 1_000_000 if magnitude >= 1e11 else 1_000_000_000
-        return max(0, int(value * factor))
+        stamp = max(0, int(value * factor))
+        return stamp if stamp <= 2**63 - 1 else 0
     if isinstance(value, str):
         try:
-            return max(0, int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1e9))
-        except ValueError:
+            stamp = max(0, int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1e9))
+            return stamp if stamp <= 2**63 - 1 else 0
+        except (ValueError, OverflowError, OSError):
             pass
     return 0
 
@@ -210,6 +222,7 @@ class Session:
         self.offset = 0
         self.file_id = None
         self.pending = b""
+        self.discarding_line = False
         self.turn = "session"
         self.model = None
         self.project = ""
@@ -218,18 +231,50 @@ class Session:
         self.run_state = "unknown"
         self.state_since = 0
         self.waiting_for = ""
-        self.pending_tools = {}
-        self.started = {}
-        self.calls = {}
-        self.usage = {}
-        self.tasks = {}
-        self.tool_inputs = {}
+        self.pending_tools = RecentMap(MAX_RECENT_CALLS)
+        self.started = RecentMap(MAX_RECENT_TURNS)
+        self.calls = RecentMap(MAX_RECENT_CALLS)
+        self.usage = RecentMap(MAX_RECENT_USAGE)
+        self.tasks = RecentMap(MAX_RECENT_TURNS)
+        self.tool_inputs = RecentMap(MAX_RECENT_CALLS)
         self.modern_usage = False
         self.last_total = None
         self.last_heartbeat = 0
         self.last_state = None
         self.skipped = 0
         self.last_activity = None
+        self.last_success_ns = 0
+        self.backlog_bytes = 0
+        self.schema_errors = 0
+        self.skipped_oversized = 0
+
+    def finish_turn(self):
+        # Roots and model usage are durable in Store. Keep only the current
+        # prompt/start for status; unresolved calls have their own bounded grace
+        # window and must survive completion and subsequent turns.
+        for key in list(self.started):
+            if key != self.turn:
+                del self.started[key]
+        if self.turn in self.tasks:
+            task = self.tasks[self.turn]
+            self.tasks.clear()
+            self.tasks[self.turn] = task
+        else:
+            self.tasks.clear()
+
+    def diagnostics(self):
+        return {"source_path": str(self.path), "last_success_ns": self.last_success_ns,
+                "backlog_bytes": self.backlog_bytes, "skipped_records": self.skipped,
+                "skipped_oversized_records": self.skipped_oversized,
+                "schema_errors": self.schema_errors,
+                "cache_evictions": sum(mapping.evictions for mapping in
+                    (self.started, self.tasks, self.calls, self.tool_inputs, self.usage, self.pending_tools)),
+                "cache_tracked_bytes": sum(mapping.tracked_bytes for mapping in
+                    (self.started, self.tasks, self.calls, self.tool_inputs, self.usage, self.pending_tools)),
+                "cache_max_bytes": sum(mapping.max_bytes for mapping in
+                    (self.started, self.tasks, self.calls, self.tool_inputs, self.usage, self.pending_tools)),
+                "cache_dropped_oversized_entries": sum(mapping.dropped_oversized for mapping in
+                    (self.started, self.tasks, self.calls, self.tool_inputs, self.usage, self.pending_tools))}
 
     def observe_state(self, row, stamp):
         """Track explicit lifecycle records; absence of output is not an approval wait."""
@@ -351,6 +396,8 @@ class Session:
             attrs["gen_ai.usage.reasoning_tokens"] = count(usage.get(reasoning))
         if self.model:
             attrs["gen_ai.request.model"] = str(self.model)[:200]
+        if claude:
+            attrs["observatory.native_usage"] = {field: count(usage.get(field)) for field in CLAUDE_USAGE_FIELDS}
         return self.span(key, self.runtime + " · " + str(self.model or "model call")[:200], stamp, attrs)
 
     def codex(self, row, stamp):
@@ -435,7 +482,7 @@ class Session:
                         name, end, attrs, start=start, error=error)]
         return []
 
-    def claude(self, row, stamp):
+    def claude(self, row, stamp, prior_models=None):
         self.session_id = str(row.get("sessionId") or self.session_id)
         self.project = Path(row["cwd"]).name if row.get("cwd") else self.project
         message = row.get("message") or {}
@@ -463,9 +510,25 @@ class Session:
             key = message.get("id") or row.get("uuid") or stamp
             usage = message.get("usage")
             if isinstance(usage, dict):
-                previous = self.usage.setdefault(key, {})
-                for field in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+                previous = self.usage.get(key)
+                if previous is None:
+                    previous = {}
+                    # Evicting maxima must not lower a persisted model span if
+                    # an old streaming update arrives after the cache window.
+                    if self.usage.evictions or self.usage.dropped_oversized:
+                        span_id = identity(self.source_id, ("model", key), size=16)
+                        span = (prior_models or {}).get((identity(self.source_id, self.turn), span_id))
+                        if span:
+                            previous = span["attributes"].get("observatory.native_usage", previous)
+                        elif hasattr(self.store, "_connect"):
+                            with self.store._connect() as db:
+                                saved = db.execute("SELECT attributes FROM spans WHERE trace_id=? AND span_id=?",
+                                    (identity(self.source_id, self.turn), span_id)).fetchone()
+                            if saved:
+                                previous = json.loads(saved[0]).get("observatory.native_usage", {})
+                for field in CLAUDE_USAGE_FIELDS:
                     previous[field] = max(count(previous.get(field)), count(usage.get(field)))
+                self.usage[key] = previous
                 result.append(self.model_span(("model", key), previous, stamp, claude=True))
             for block in blocks:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
@@ -479,8 +542,10 @@ class Session:
         file_id = stat.st_dev, stat.st_ino
         if self.file_id != file_id or stat.st_size < self.offset:
             self.offset, self.pending = 0, b""
+            self.discarding_line = False
             self.file_id = file_id
             self.last_total = None
+            self.modern_usage = False
             self.started.clear()
             self.calls.clear()
             self.usage.clear()
@@ -493,50 +558,78 @@ class Session:
                 # Recover session identity from the header, then import a bounded tail.
                 header = stream.readline(MAX_LINE)
                 try:
-                    row = json.loads(header)
+                    row = loads(header)
                     if self.runtime == "Codex":
                         self.codex(row, timestamp(row.get("timestamp")))
-                except (ValueError, TypeError, AttributeError):
-                    pass
+                except (ValueError, TypeError, AttributeError, OverflowError, RecursionError):
+                    self.skipped += 1
+                    self.schema_errors += 1
                 stream.seek(stat.st_size - MAX_READ)
-                stream.readline()
+                # Skip only the partial first record, without allocating an
+                # arbitrarily large line from a malformed session file.
+                while True:
+                    fragment = stream.readline(MAX_LINE)
+                    if not fragment or fragment.endswith(b"\n"):
+                        break
                 self.offset = stream.tell()
             stream.seek(self.offset)
             data = stream.read(MAX_READ)
             self.offset = stream.tell()
+        self.backlog_bytes = max(0, stat.st_size - self.offset)
+        if self.discarding_line:
+            _, separator, data = data.partition(b"\n")
+            self.discarding_line = not bool(separator)
         chunks = (self.pending + data).split(b"\n")
         self.pending = chunks.pop()
         if len(self.pending) > MAX_LINE:
             self.pending = b""
+            self.discarding_line = True
             self.skipped += 1
+            self.skipped_oversized += 1
         records = []
         for line in chunks:
             if len(line) > MAX_LINE:
                 self.skipped += 1
+                self.skipped_oversized += 1
                 continue
             try:
-                row = json.loads(line)
+                row = loads(line)
                 if isinstance(row, dict):
                     records.append(row)
-            except (ValueError, UnicodeDecodeError):
+                else:
+                    self.skipped += 1
+                    self.schema_errors += 1
+            except (ValueError, UnicodeDecodeError, OverflowError, RecursionError):
                 self.skipped += 1
+                self.schema_errors += 1
         if self.runtime == "Codex" and any(row.get("type") == "token_usage_record" for row in records):
             self.modern_usage = True
         spans = []
+        # Poll-local references only (bounded by MAX_READ), discarded on return.
+        # Avoid scanning the entire batch for late streaming usage updates.
+        prior_models = {}
         logs = []
         from .local_activity import codex_activity, claude_activity
         for row in records:
             try:
                 stamp = timestamp(row.get("timestamp"))
-                spans.extend(span for span in (self.codex(row, stamp) if self.runtime == "Codex" else self.claude(row, stamp)) if span)
+                new_spans = self.codex(row, stamp) if self.runtime == "Codex" else self.claude(row, stamp, prior_models)
+                for span in new_spans:
+                    if span:
+                        spans.append(span)
+                        if "observatory.native_usage" in span["attributes"]:
+                            prior_models[(span["trace_id"], span["span_id"])] = span
                 logs.extend(codex_activity(self, row, stamp) if self.runtime == "Codex" else claude_activity(self, row, stamp))
                 self.observe_state(row, stamp)
                 if self.capture_details and self.turn in self.tasks and self.turn in self.started:
                     payload = row.get("payload") or {}
                     if (self.runtime == "Codex" and isinstance(payload, dict) and (payload.get("item") or {}).get("type") == "UserMessage") or (self.runtime == "Claude Code" and row.get("type") == "user" and plaintext_task(row)):
                         spans.append(self.root(stamp, "running"))
-            except (ValueError, TypeError, KeyError, AttributeError):
+                if self.run_state in {"completed", "interrupted"}:
+                    self.finish_turn()
+            except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
                 self.skipped += 1
+                self.schema_errors += 1
         if self.internal:
             for span in spans:
                 span['service'] = self.service
@@ -557,6 +650,7 @@ class Session:
                                   "action": last["attributes"].get("agent.activity.action"),
                                   "subject": last["attributes"].get("agent.activity.subject"),
                                   "result": last["attributes"].get("agent.activity.result")}
+        self.last_success_ns = time.time_ns()
         state = "running" if time.time() - stat.st_mtime < 35 else "stopped"
         if time.monotonic() - self.last_heartbeat > 10 or state != self.last_state:
             self.store.register_connection({"source_id": self.source_id, "service": self.service,
@@ -595,20 +689,22 @@ class LocalAgents:
     def discover(self):
         roots = [(Path(os.environ.get("CODEX_HOME", str(Path.home()/".codex")))/"sessions", "Codex"),
                  (Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home()/".claude")))/"projects", "Claude Code")]
-        recent = []
-        for root, runtime in roots:
-            if not root.is_dir():
-                continue
-            for path in root.rglob("*.jsonl"):
-                try:
-                    modified = path.stat().st_mtime
-                    if modified >= time.time() - 86400:
-                        recent.append((modified, path, runtime))
-                except OSError:
-                    self.errors += 1
-        selected = sorted(recent, key=lambda row: row[0], reverse=True)[:MAX_SOURCES]
-        self.discovered_sources = len(recent)
-        self.omitted_sources = max(0, len(recent) - len(selected))
+        cutoff = time.time() - 86400
+        self.discovered_sources = 0
+        def recent():
+            for root, runtime in roots:
+                if not root.is_dir():
+                    continue
+                for path in root.rglob("*.jsonl"):
+                    try:
+                        modified = path.stat().st_mtime
+                        if modified >= cutoff:
+                            self.discovered_sources += 1
+                            yield modified, path, runtime
+                    except OSError:
+                        self.errors += 1
+        selected = heapq.nlargest(MAX_SOURCES, recent(), key=lambda row: row[0])
+        self.omitted_sources = max(0, self.discovered_sources - len(selected))
         keys = {path for _, path, _ in selected}
         self.sessions = {path: session for path, session in self.sessions.items() if path in keys}
         for _, path, runtime in selected:
@@ -665,9 +761,13 @@ class LocalAgents:
         return {"enabled": True, "sources": len(sessions), "discovered_sources": self.discovered_sources,
                 "omitted_sources": self.omitted_sources, "read_errors": self.errors,
                 "skipped_records": sum(session.skipped for session in sessions),
+                "backlog_bytes": sum(session.backlog_bytes for session in sessions),
+                "schema_errors": sum(session.schema_errors for session in sessions),
+                "skipped_oversized_records": sum(session.skipped_oversized for session in sessions),
                 "capture_content": self.capture_details, "lookback_hours": 24, "max_sources": MAX_SOURCES,
                 "opencode_discovered_sessions": self.opencode.discovered_sessions,
                 "opencode_omitted_sessions": self.opencode.omitted_sessions,
+                "opencode_diagnostics": self.opencode.diagnostics(),
                 "runtime": self.runtime_snapshot,
                 "mcp_configurations": list(self.mcp_configurations),
                 "mcp_config_errors": self.mcp_config_errors,
@@ -681,6 +781,7 @@ class LocalAgents:
                               "task": "Approval review" if session.internal else (session.tasks.get(session.turn) or "")[:500],
                               "capture_content": session.capture_details,
                               "last_activity": session.last_activity,
+                              "diagnostics": session.diagnostics(),
                               "bytes_read": session.offset} for session in sessions] + self.opencode.status_sessions(),
                 "opencode_read_errors": self.opencode.errors}
 

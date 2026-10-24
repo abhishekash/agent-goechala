@@ -86,6 +86,8 @@ pretending it can approve on the agent's behalf.
 | `t` | Follow the linked trace |
 | `Esc` / `Alt+←` | Return / navigate back |
 | `c` | Copy details |
+| `d` | Collection diagnostics and retention guidance |
+| `x` | Preview and export selected evidence |
 | `q` | Quit |
 
 ### Four themes
@@ -119,6 +121,7 @@ them.
 - [Pydantic AI, Google ADK, Gemini CLI, and other OTLP agents](docs/frameworks.md)
 - [JavaScript client](docs/javascript.md)
 - [Receiver and OTLP configuration](docs/receiver.md)
+- [Resource budgets and benchmarking](docs/performance.md)
 - [Brand assets and Alpine Ember theme](docs/branding.md)
 
 For querying recorded MCP executions conversationally, see

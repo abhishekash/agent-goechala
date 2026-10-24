@@ -23,7 +23,22 @@ agenturm cockpit --endpoint http://127.0.0.1:14318
 
 The receiver binds to loopback by default. For authenticated access, set `OBSERVATORY_TOKEN` in the receiver environment and send a bearer token. Use TLS and a trusted reverse proxy before allowing remote access. The local receiver does not provide multiuser access controls.
 
-Optional retention:
+The built-in receiver and cockpit receiver admit at most 32 concurrent request
+workers. Excess connections receive HTTP 503 with `Retry-After: 1`; exporters
+should retry with backoff. Requests have absolute header and body read deadlines
+of 10 and 15 seconds, respectively, plus 5-second socket/write timeouts. Stalled
+or slow-drip reads receive HTTP 408 when a response can still be sent. Shutdown
+interrupts active connections before closing storage. These limits do not make
+the local collector an internet-facing service.
+
+### JSONL file watching
+
+Use `--watch-jsonl path/to/spans.jsonl` to follow native span records. Each poll
+reads at most 8 MiB; a large backlog is processed over successive polls. Records
+larger than 2 MiB are dropped through their terminating newline, including when
+the record spans multiple polls. Keep one complete JSON object per line.
+
+### Retention
 
 ```bash
 agenturm serve --retention-days 30

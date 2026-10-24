@@ -14,11 +14,15 @@ from pathlib import Path
 from .core import normalize_native
 from .local_activity import mcp_attributes, safe
 from .local_agents import identity, timestamp
+from .native_json import loads
 
 MAX_SESSIONS = 50
 MAX_MESSAGES_PER_SESSION = 30
 MAX_PARTS_PER_MESSAGE = 200
 LOOKBACK_NS = 24 * 60 * 60 * 1_000_000_000
+LOOKBACK_REFRESH_SECONDS = 30
+MAX_PAYLOAD_BYTES = 2 * 1024 * 1024
+MAX_POLL_PAYLOAD_BYTES = 16 * 1024 * 1024
 
 
 def database_path():
@@ -37,9 +41,9 @@ def _json(value):
     if not isinstance(value, str):
         return value if isinstance(value, dict) else {}
     try:
-        result = json.loads(value)
+        result = loads(value)
         return result if isinstance(result, dict) else {}
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return {}
 
 
@@ -104,11 +108,86 @@ class OpenCodeReader:
         self.omitted_sessions = 0
         self.errors = 0
         self.updated_ns = 0
+        self.schema_errors = 0
+        self.skipped_oversized = 0
+        self.skipped_budget = 0
+        self.budget_excluded_bytes = 0
+        self.payload_bytes = 0
+        self._last_refresh = 0
         self.mcp_servers = ()
         # Fixed-size digests, bounded to the current session/message window.
         # Never keep tool payloads or an unbounded history in memory.
         self._message_revisions = {}
         self._progress_revisions = {}
+        self._part_revisions = {}
+        self._payload_cursors = {}
+        self._session_cursor = 0
+        self.backlog_records = 0
+        self._message_bytes = 0
+
+    def diagnostics(self):
+        return {"source_path": str(self.path), "last_success_ns": self.updated_ns,
+                "schema_errors": self.schema_errors, "read_errors": self.errors,
+                "skipped_oversized_records": self.skipped_oversized,
+                "skipped_budget_records": self.skipped_budget,
+                "budget_excluded_bytes_last_poll": self.budget_excluded_bytes,
+                "backlog_records": self.backlog_records,
+                "payload_bytes_last_poll": self.payload_bytes,
+                "max_payload_bytes": MAX_PAYLOAD_BYTES,
+                "max_poll_payload_bytes": MAX_POLL_PAYLOAD_BYTES}
+
+    def _payload_rows(self, db, table, fields, suffix, params, *, cursors, cursor_key,
+                      messages=False, advance=True):
+        """Inspect byte lengths before transferring any JSON into Python.
+
+        Count caps alone cannot bound fetchall(): even one tool output may be
+        enormous. Query only metadata first, then transfer eligible payloads.
+        Oversized records are omitted. Budget-deferred rows resume first next
+        time; rotating complete windows also prevents legacy schemas without
+        timestamps from repeatedly consuming the budget on the same prefix.
+        """
+        selected = [f'"{name}"' for name in fields if name != "data"]
+        selected.append('length(CAST("data" AS BLOB)) AS payload_size')
+        rows = db.execute(f'SELECT {",".join(selected)} FROM "{table}"' + suffix, params).fetchall()
+        order = {str(row["id"]): index for index, row in enumerate(rows)}
+        start = order.get(cursors.get(cursor_key), 0)
+        rows = rows[start:] + rows[:start]
+        result = []
+        deferred = None
+        for row in rows:
+            size = row["payload_size"] or 0
+            if size > MAX_PAYLOAD_BYTES:
+                self.skipped_oversized += 1
+                continue
+            # Reserve half the poll for tools, rather than preloading a whole
+            # message window and leaving no budget for any of its parts.
+            message_full = messages and self._message_bytes and self._message_bytes + size > MAX_POLL_PAYLOAD_BYTES // 2
+            if self.payload_bytes + size > MAX_POLL_PAYLOAD_BYTES or message_full:
+                self.skipped_budget += 1
+                self.budget_excluded_bytes += size
+                if size <= MAX_POLL_PAYLOAD_BYTES:
+                    self.backlog_records += 1
+                    deferred = deferred or str(row["id"])
+                continue
+            # The read transaction makes the size preflight and fetch coherent.
+            raw = db.execute(f'SELECT "data" FROM "{table}" WHERE "id"=?', (row["id"],)).fetchone()[0]
+            self.payload_bytes += size
+            if messages:
+                self._message_bytes += size
+            data = dict(row)
+            data.pop("payload_size")
+            data["data"] = raw
+            data["_window_order"] = order[str(row["id"])]
+            result.append(data)
+        if rows:
+            cursors[cursor_key] = deferred or str(rows[(1 if advance else 0) % len(rows)]["id"])
+        return result, set(order)
+
+    def _decode(self, value):
+        result = _json(value)
+        if not result and value not in (None, "", "{}"):
+            self.schema_errors += 1
+        return result
 
     def set_mcp_servers(self, server_names):
         """Set OpenCode server names discovered from config, without settings."""
@@ -119,6 +198,7 @@ class OpenCodeReader:
             # enrich tool records that were initially ingested without it.
             self.fingerprint = None
             self._message_revisions.clear()
+            self._part_revisions.clear()
 
     @staticmethod
     def _tables(db):
@@ -158,8 +238,9 @@ class OpenCodeReader:
         if not {"session_id", "status"} <= columns:
             return None
         selected = [name for name in ("content", "status", "position", "time_updated") if name in columns]
+        expressions = ['substr("content",1,500) AS "content"' if name == "content" else f'"{name}"' for name in selected]
         order = ' ORDER BY "position"' if "position" in columns else ""
-        rows = db.execute(f'SELECT {",".join(chr(34)+name+chr(34) for name in selected)} FROM "todo" WHERE "session_id"=?{order} LIMIT 100',
+        rows = db.execute(f'SELECT {",".join(expressions)} FROM "todo" WHERE "session_id"=?{order} LIMIT 100',
                           (session_id,)).fetchall()
         if not rows:
             return None
@@ -205,13 +286,24 @@ class OpenCodeReader:
             self.fingerprint = None
             self._message_revisions.clear()
             self._progress_revisions.clear()
+            self._part_revisions.clear()
+            self._payload_cursors.clear()
+            self.backlog_records = 0
             return 0
-        if fingerprint == self.fingerprint:
+        if fingerprint == self.fingerprint and not self.backlog_records and time.monotonic() - self._last_refresh < LOOKBACK_REFRESH_SECONDS:
             return 0
+        self.payload_bytes = 0
+        self.budget_excluded_bytes = 0
+        self.backlog_records = 0
+        self._message_bytes = 0
         accepted = []
         progress_logs = []
         sessions = []
-        message_revisions = {}
+        message_revisions = dict(self._message_revisions)
+        part_revisions = dict(self._part_revisions)
+        cursors = dict(self._payload_cursors)
+        message_window = set()
+        part_windows = {}
         progress_revisions = {}
         try:
             uri = self.path.resolve().as_uri() + "?mode=ro"
@@ -219,16 +311,33 @@ class OpenCodeReader:
                 db.row_factory = sqlite3.Row
                 db.execute("PRAGMA query_only=ON")
                 db.execute("PRAGMA busy_timeout=250")
+                db.execute("BEGIN")
                 tables = self._tables(db)
                 if "session" not in tables:
+                    self.schema_errors += 1
+                    self.sessions = []
                     self.discovered_sessions = 0
                     self.omitted_sessions = 0
+                    self._message_revisions.clear()
+                    self._progress_revisions.clear()
+                    self._part_revisions.clear()
+                    self._payload_cursors.clear()
                     self.fingerprint = fingerprint
+                    self._last_refresh = time.monotonic()
                     return 0
                 session_columns = self._columns(db, "session")
                 required = {"id", "time_updated"}
                 if not required <= session_columns:
+                    self.schema_errors += 1
+                    self.sessions = []
+                    self.discovered_sessions = 0
+                    self.omitted_sessions = 0
+                    self._message_revisions.clear()
+                    self._progress_revisions.clear()
+                    self._part_revisions.clear()
+                    self._payload_cursors.clear()
                     self.fingerprint = fingerprint
+                    self._last_refresh = time.monotonic()
                     return 0
                 columns = [name for name in ("id", "project_id", "title", "directory", "time_created",
                             "time_updated", "agent", "model", "tokens_input", "tokens_output")
@@ -239,18 +348,30 @@ class OpenCodeReader:
                     'SELECT COUNT(*) FROM "session" WHERE "time_updated">=?', (cutoff_ms,)
                 ).fetchone()[0])
                 self.omitted_sessions = max(0, self.discovered_sessions - MAX_SESSIONS)
-                sql = f'SELECT {",".join(chr(34)+name+chr(34) for name in columns)} FROM "session" WHERE "time_updated">=? ORDER BY "time_updated" DESC LIMIT ?'
+                expressions = [f'substr("{name}",1,4096) AS "{name}"' if name in {"title", "directory", "agent", "model"} else f'"{name}"' for name in columns]
+                sql = f'SELECT {",".join(expressions)} FROM "session" WHERE "time_updated">=? ORDER BY "time_updated" DESC LIMIT ?'
                 rows = db.execute(sql, (cutoff_ms, MAX_SESSIONS)).fetchall()
+                if rows:
+                    start = self._session_cursor % len(rows)
+                    rows = rows[start:] + rows[:start]
                 project_names = {}
                 if "project" in tables:
                     project_columns = self._columns(db, "project")
                     if "id" in project_columns:
                         project_fields = [name for name in ("id", "name", "worktree") if name in project_columns]
-                        for project in db.execute(f'SELECT {",".join(chr(34)+name+chr(34) for name in project_fields)} FROM "project"'):
-                            project_names[project["id"]] = project["name"] or Path(project["worktree"] or "").name
+                        expressions = [f'"{name}"' if name == "id" else f'substr("{name}",1,4096) AS "{name}"' for name in project_fields]
+                        project_ids = list(dict.fromkeys(row["project_id"] for row in rows if "project_id" in row.keys()))
+                        placeholders = ",".join("?" for _ in project_ids)
+                        for project_row in db.execute(f'SELECT {",".join(expressions)} FROM "project" WHERE "id" IN ({placeholders})', project_ids):
+                            project = dict(project_row)
+                            project_names[project["id"]] = project.get("name") or Path(project.get("worktree") or "").name
                 message_table = "message" if "message" in tables else "session_message" if "session_message" in tables else None
                 message_columns = self._columns(db, message_table) if message_table else set()
                 part_columns = self._columns(db, "part") if "part" in tables else set()
+                if message_table and not {"id", "session_id", "data"} <= message_columns:
+                    self.schema_errors += 1
+                if "part" in tables and not {"id", "session_id", "message_id", "data"} <= part_columns:
+                    self.schema_errors += 1
                 for session in rows:
                     data = dict(session)
                     session_id = str(data["id"])
@@ -271,30 +392,41 @@ class OpenCodeReader:
                     read_table, read_columns = message_table, message_columns
                     if not read_table or not {"id", "session_id", "data"} <= read_columns:
                         continue
-                    msg_fields = [name for name in ("id", "session_id", "time_created", "time_updated", "data") if name in read_columns]
+                    msg_fields = [name for name in ("id", "session_id", "type", "time_created", "time_updated", "data") if name in read_columns]
                     order_by = ' ORDER BY "time_created" DESC' if "time_created" in read_columns else ""
-                    messages = db.execute(f'SELECT {",".join(chr(34)+name+chr(34) for name in msg_fields)} FROM "{read_table}" WHERE "session_id"=?{order_by} LIMIT ?',
-                                          (session_id, MAX_MESSAGES_PER_SESSION)).fetchall()
-                    if not messages and read_table == "message" and "session_message" in tables:
+                    messages, message_ids = self._payload_rows(db, read_table, msg_fields,
+                        f' WHERE "session_id"=?{order_by} LIMIT ?', (session_id, MAX_MESSAGES_PER_SESSION),
+                        cursors=cursors, cursor_key=(read_table, session_id, None), messages=True,
+                        # Advance a complete message window on its session's
+                        # priority poll, not on every visit: otherwise equal
+                        # session/message counts can phase-lock and starve the
+                        # same messages in legacy content-comparison schemas.
+                        advance=session_id == str(rows[0]['id']))
+                    if not message_ids and read_table == "message" and "session_message" in tables:
                         v2_columns = self._columns(db, "session_message")
                         if {"id", "session_id", "data"} <= v2_columns:
                             read_table = "session_message"
                             read_columns = v2_columns
                             msg_fields = [name for name in ("id", "session_id", "type", "time_created", "time_updated", "data") if name in v2_columns]
                             order_by = ' ORDER BY "time_created" DESC' if "time_created" in read_columns else ""
-                            messages = db.execute(f'SELECT {",".join(chr(34)+name+chr(34) for name in msg_fields)} FROM "{read_table}" WHERE "session_id"=?{order_by} LIMIT ?',
-                                                  (session_id, MAX_MESSAGES_PER_SESSION)).fetchall()
+                            messages, message_ids = self._payload_rows(db, read_table, msg_fields,
+                                f' WHERE "session_id"=?{order_by} LIMIT ?', (session_id, MAX_MESSAGES_PER_SESSION),
+                                cursors=cursors, cursor_key=(read_table, session_id, None), messages=True,
+                                advance=session_id == str(rows[0]['id']))
+                    message_window.update((session_id, mid) for mid in message_ids)
                     latest_trace = latest_root_id = None
+                    latest_order = float("inf")
                     for message in messages:
-                        message_data = _json(message["data"])
+                        message_data = self._decode(message["data"])
                         role = message_data.get("role") or (message["type"] if "type" in message.keys() else "")
                         if str(role) != "assistant":
                             continue
                         message_id = str(message["id"])
                         trace_id = identity("opencode-trace", session_id, message_id)
                         root_id = identity("opencode-root", session_id, message_id, size=16)
-                        if latest_trace is None:
+                        if message["_window_order"] < latest_order:
                             latest_trace, latest_root_id = trace_id, root_id
+                            latest_order = message["_window_order"]
                         # A write anywhere in OpenCode's DB used to re-import
                         # every recent message, including large tool outputs.
                         # Check cheap part revisions first. Older schemas without
@@ -304,29 +436,30 @@ class OpenCodeReader:
                         part_order = ' ORDER BY "time_created","id"' if "time_created" in part_columns else ' ORDER BY "id"'
                         part_params = (session_id, message_id, MAX_PARTS_PER_MESSAGE)
                         part_query = ' FROM "part" WHERE "session_id"=? AND "message_id"=?' + part_order + ' LIMIT ?'
-                        if has_parts:
-                            revision_field = 'time_updated' if 'time_updated' in part_columns else 'data'
-                            part_versions = [tuple(row) for row in db.execute(
-                                'SELECT "id","' + revision_field + '"' + part_query, part_params)]
-                            if revision_field == 'time_updated' and any(row[1] is None for row in part_versions):
-                                # A nullable/unpopulated revision is not evidence
-                                # that a payload is unchanged.
-                                revision_field = 'data'
-                                part_versions = [tuple(row) for row in db.execute(
-                                    'SELECT "id","data"' + part_query, part_params)]
-                            if revision_field == 'data':
-                                parts = part_versions
-                        else:
-                            part_versions = []
                         revision = hashlib.sha256(json.dumps(
-                            (read_table, dict(message), data.get("title"), data.get("model"), project, part_versions),
+                            (read_table, dict(message), data.get("title"), data.get("model"), project),
                             ensure_ascii=False, sort_keys=True).encode()).digest()
                         key = (session_id, message_id)
+                        message_changed = self._message_revisions.get(key) != revision
                         message_revisions[key] = revision
-                        if self._message_revisions.get(key) == revision:
-                            continue
-                        if has_parts and revision_field == 'time_updated':
-                            parts = db.execute('SELECT "id","data"' + part_query, part_params).fetchall()
+                        part_stamps = {}
+                        if has_parts:
+                            field = '"time_updated"' if 'time_updated' in part_columns else 'NULL'
+                            part_stamps = {str(row[0]): row[1] for row in db.execute(
+                                'SELECT "id",' + field + part_query, part_params)}
+                            part_windows[key] = set(part_stamps)
+                            wanted = []
+                            for pid, stamp in part_stamps.items():
+                                version = hashlib.sha256(revision + str(stamp).encode()).digest() if stamp is not None else None
+                                if version is None or part_revisions.get((*key, pid)) != version:
+                                    wanted.append(pid)
+                            if wanted:
+                                placeholders = ','.join('?' for _ in wanted)
+                                suffix = ' WHERE "session_id"=? AND "message_id"=? AND "id" IN (' + placeholders + ')' + part_order + ' LIMIT ?'
+                                part_rows, _ = self._payload_rows(db, 'part', ['id', 'data'], suffix,
+                                    (session_id, message_id, *wanted, MAX_PARTS_PER_MESSAGE),
+                                    cursors=cursors, cursor_key=('part', session_id, message_id))
+                                parts = [(row['id'], row['data']) for row in part_rows]
                         message_created = message["time_created"] if "time_created" in message.keys() else 0
                         message_updated = message["time_updated"] if "time_updated" in message.keys() else message_created
                         start_ns = _first_timestamp((message_data.get("time") or {}).get("created"), message_created)
@@ -347,7 +480,8 @@ class OpenCodeReader:
                             "resource_attributes": {"service.name": "opencode", "agent.runtime": "OpenCode",
                                 "observatory.source_id": self.source_id, "observatory.capture": "local-session-database"},
                             "scope_name": "observatory.opencode"}, "opencode")
-                        accepted.append(root)
+                        if message_changed:
+                            accepted.append(root)
                         model = _model(message_data.get("modelID") or data.get("model"))
                         tokens = message_data.get("tokens") if isinstance(message_data.get("tokens"), dict) else {}
                         model_id = None
@@ -364,21 +498,29 @@ class OpenCodeReader:
                                     value = cache.get(source.split(".", 1)[1])
                                 else:
                                     value = tokens.get(source)
-                                if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                                if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 and (not isinstance(value, float) or math.isfinite(value)):
                                     model_attrs[target] = int(value)
                             cost = message_data.get("cost")
                             if isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost) and cost > 0:
                                 model_attrs["gen_ai.usage.cost"] = float(cost)
                             model_id = identity("opencode-model", session_id, message_id, size=16)
-                            accepted.append(normalize_native({"trace_id": trace_id, "span_id": model_id,
+                            model_span = normalize_native({"trace_id": trace_id, "span_id": model_id,
                                 "parent_span_id": root_id, "name": "chat " + (model or "model call"),
                                 "start_unix_nano": start_ns, "end_unix_nano": end_ns,
                                 "status": "ERROR" if state == "error" else "OK", "attributes": model_attrs,
                                 "resource_attributes": {"service.name": "opencode", "observatory.source_id": self.source_id},
-                                "scope_name": "observatory.opencode"}, "opencode"))
+                                "scope_name": "observatory.opencode"}, "opencode")
+                            if message_changed:
+                                accepted.append(model_span)
                         for part in parts:
                             part_id, raw_part = part
-                            part_data = _json(raw_part)
+                            stamp = part_stamps[str(part_id)]
+                            version = hashlib.sha256(revision + (str(stamp).encode() if stamp is not None else str(raw_part).encode())).digest()
+                            part_key = (*key, str(part_id))
+                            if part_revisions.get(part_key) == version:
+                                continue
+                            part_revisions[part_key] = version
+                            part_data = self._decode(raw_part)
                             if part_data.get("type") != "tool":
                                 continue
                             tool_name = str(part_data.get("tool") or "tool")[:256]
@@ -422,17 +564,26 @@ class OpenCodeReader:
                             progress_revisions[session_id] = revision
                             if self._progress_revisions.get(session_id) != revision:
                                 progress_logs.append(progress)
-        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError, RecursionError):
             self.errors += 1
+            self.schema_errors += 1
             return 0
-        self.sessions = sessions
+        self.sessions = sorted(sessions, key=lambda item: (-item['last_update_ns'], item['session_id']))
         if accepted:
             self.store.ingest(accepted)
         if progress_logs:
             self.store.ingest_logs(progress_logs)
         # Publish only after successful ingestion, so a failure can be retried.
-        self._message_revisions = message_revisions
+        self._message_revisions = {key: value for key, value in message_revisions.items() if key in message_window}
+        self._part_revisions = {key: value for key, value in part_revisions.items()
+                                if key[:2] in message_window and
+                                (key[:2] not in part_windows or key[2] in part_windows[key[:2]])}
+        session_ids = {item['session_id'] for item in sessions}
+        self._payload_cursors = {key: value for key, value in cursors.items()
+                                 if key[1] in session_ids and (key[2] is None or key[1:] in message_window)}
+        self._session_cursor += 1
         self._progress_revisions = progress_revisions
         self.fingerprint = fingerprint
         self.updated_ns = time.time_ns()
+        self._last_refresh = time.monotonic()
         return len(accepted) + len(progress_logs)

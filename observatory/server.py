@@ -7,7 +7,7 @@ import io
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from .core import Store, normalize_native, normalize_otlp, TRACE_ID
@@ -15,12 +15,16 @@ from .otlp_proto import decode_trace_request
 from .logs import normalize_otlp_logs, decode_log_request
 from .metrics import normalize_otlp_metrics, decode_metric_request
 from .watch import start_watchers
+from .receiver import BoundedHTTPServer, DeadlineHandler
+
+# Preserve the historical server import while exposing the explicit bounded name.
+ThreadingHTTPServer = BoundedHTTPServer
 
 MAX_BODY = 8 * 1024 * 1024
 
 
 def handler_for(store: Store, token: str | None = None, quiet=False):
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(DeadlineHandler, BaseHTTPRequestHandler):
         def _json(self, code, value):
             data = json.dumps(value, ensure_ascii=False).encode()
             self.send_response(code)
@@ -237,7 +241,7 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                 if size <= 0 or size > MAX_BODY:
                     self._json(413, {"error": "body size must be 1 to 8 MiB"})
                     return
-                raw = self.rfile.read(size)
+                raw = self.read_body(size)
                 if len(raw) != size:
                     raise ValueError("truncated request body")
                 encoding = self.headers.get("Content-Encoding", "identity").lower()
@@ -294,7 +298,11 @@ def handler_for(store: Store, token: str | None = None, quiet=False):
                     self._json(200, {"accepted": count})
                 else:
                     self._json(404, {"error": "not found"})
-            except (ValueError, TypeError, KeyError, AttributeError, OSError, EOFError, json.JSONDecodeError) as exc:
+            except TimeoutError:
+                raise
+            except (ValueError, TypeError, KeyError, AttributeError, OSError, EOFError, OverflowError, RecursionError) as exc:
+                if self._response_started:
+                    raise
                 self._json(400, {"error": str(exc)})
 
         def log_message(self, format, *args):

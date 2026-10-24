@@ -81,11 +81,14 @@ actions can wake the feed immediately. Collection continues independently, even
 when display updates are paused. Tables update changed cells instead of
 invalidating an entire row.
 
-OpenCode polling skips unchanged databases. When a database changes, unchanged
-messages are not normalized or written again. On schemas with part update
-timestamps, unchanged tool payloads are not loaded again; older schemas fall
-back to content comparison. Revision caches contain only fixed-size digests
-within the 50-session / 30-message import window, not retained tool outputs.
+OpenCode polling skips unchanged databases between a 30-second lookback refresh;
+that periodic refresh ages old sessions out even when OpenCode writes nothing.
+When a database changes, unchanged messages are not normalized or written again.
+On schemas with part update timestamps, unchanged tool payloads are not loaded
+again; older schemas fall back to content comparison. Revision caches contain
+only fixed-size digests within the 50-session / 30-message import window, not
+retained tool outputs. Payloads are capped at 2 MiB per record and 16 MiB per
+poll; deferred records resume on later polls.
 Initial import still costs more than steady-state monitoring, and large
 histories or sustained telemetry can increase CPU, memory and database size.
 
@@ -130,11 +133,35 @@ This launcher runs the selected script in that terminal and is intended for SDKs
 
 Use the mouse or **1–7** to switch views. **↑/↓** selects a table row; its inspector updates automatically. **Enter** opens the inspector; **e** expands it to use the full workspace and **Esc** returns to the list. On compact terminals, Enter expands the inspector automatically. **Tab** moves between controls and scrollable panels. On Agents, **s** focuses the selected session's activity. **t** opens the selected activity, MCP operation, finding, or metric exemplar's related trace when one is linked. **Alt+Left** or the **Back** button returns to the original event and scroll position; **Esc** first clears a text selection or closes an expanded inspector, then returns from a linked trace. **/** focuses the current view's search, **Esc** returns to its table, **a** resets session and search filters, **v** toggles approval reviews, **p** pauses updates, and **q** quits. When search has focus, printable keys enter text; press **Esc** before using shortcuts.
 
-Each view has its own search field and result count directly above its rows. Search in Agents filters sessions by task, project, model, runtime, or session ID. Activity, MCP Calls, and Traces query their own records; Host filters the process list; Metrics filters OTLP instruments by name, service, kind, unit, or description; Findings searches severity, finding type, task, and evidence text in the current page. Findings are global across sessions and can be paged with **Older**, **Newer**, and **Latest**. The Metrics view shows the latest stored point for each instrument with its value, unit, point attributes, resource attributes, and data. Select an instrument to load its latest 100 points; points with OTLP exemplars can open the linked trace with **t** or **Open exemplar**. It loads up to 500 catalog entries and 200 recent points for the overview, refreshing this inventory every three seconds. The session Scope control filters Metrics by the selected session's service; metric points are not attributed to individual sessions unless the telemetry itself includes that association. Filters stay with their view when switching tabs. A task search in Agents does not hide MCP calls or reduce the selected agent's recent-work feed. **Clear** resets that view's query; the session Scope control applies across views. Overview counters retain the inventory for the selected session scope. The **Errors** button in Activity and MCP Calls filters failures within the current results; it does not change the inventory counts. **a** also resets these error filters. Tables resize their columns to the terminal, preserve the selected record, and keep latency and status visible. Inspectors wrap long text to the panel width.
+Press **d** for local collection diagnostics: source paths, last successful
+reads, backlog, skipped records, schema errors, first-run guidance, and retention
+commands. Diagnostics do not show receiver credentials or raw events. Source
+paths can still identify projects or users. Older receivers may not report all
+diagnostic fields.
+
+Press **x** to export selected evidence. A frozen privacy preview shows the exact
+JSON before anything is written. Choose a new destination and explicitly select
+**Write reviewed export**. Existing files are never overwritten; new files are
+owner-only. Exports contain only the selected record and currently loaded
+evidence, not complete history. They may contain private prompts, outputs,
+paths, or producer-recorded secrets: review before sharing.
+
+Theme, active view, Reviews, Prompts, and Activity/MCP error-filter flags are
+saved in `$XDG_CONFIG_HOME/agenturm/ui.json` (or
+`~/.config/agenturm/ui.json`). Searches, session IDs, selected records, endpoint
+addresses, and credentials are not persisted. Set `AGENTURM_UI_PREFERENCES=0` to
+disable preference reads and writes. Headless tests do not access personal
+preferences unless explicitly given a test preference path.
+
+Each view has its own search field and result count directly above its rows. Search in Agents filters sessions by task, project, model, runtime, or session ID. Activity, MCP Calls, and Traces query their own records; Host filters the process list; Metrics filters OTLP instruments by name, service, kind, unit, or description; Findings searches severity, finding type, task, and evidence text in the current page. Findings are global across sessions and can be paged with **Older**, **Newer**, and **Latest**.
+
+The Metrics view shows the latest stored point for each instrument with its value, unit, point attributes, resource attributes, and data. Select an instrument to load its latest 100 points; points with OTLP exemplars can open the linked trace with **t** or **Open exemplar**. The overview loads up to 500 catalog entries and 500 latest points, with inventory cached for five seconds. The session Scope control filters Metrics by the selected session's service; metric points are not attributed to individual sessions unless the telemetry itself includes that association.
+
+Filters stay with their view when switching tabs. A task search in Agents does not hide MCP calls or reduce the selected agent's recent-work feed. **Clear** resets that view's query; the session Scope control applies across views. Overview counters retain the inventory for the selected session scope. The **Errors** button in Activity and MCP Calls filters failures within the current results; it does not change the inventory counts. **a** also resets these error filters. Tables prioritize subject and status columns in narrow terminals; lower-priority metadata returns when widened, and complete records remain available in the inspector. Inspectors wrap long text to the panel width.
 
 MCP shows reported servers, tools or methods, state, duration, arguments/results and trace/span IDs. It includes protocol methods such as `tools/call`, `tools/list`, `resources/read`, and `prompts/get` when telemetry records them. Calls without a reported server remain visible under **Not reported**; Goechala does not guess their server. Tool execution spans are joined to transport calls to fill in arguments or results when the transport span omits them. Explicit MCP `isError` results mark the run and call as failed, appear in error filters, and create an evidence-linked finding even when the producing span has no error status. The trace view shows a parent-linked span tree; unknown durations remain “not reported”. “Error” describes recorded errors within a trace; “Active · errors” means a logged active turn also contains an error. Agent “Recent/Idle” states describe observed session activity. Live process counts exclude zombie/exited states and do not claim a session-to-PID mapping.
 
-The view polls about once a second and preserves the event being read as new records arrive. Activity, MCP Calls, and Traces have **Older**, **Newer**, and **Latest** controls (shortcuts **]**, **[**, and **l**) to browse saved records in pages of 200 events, 100 MCP calls, or 100 traces. Search and scope changes return that view to its latest matching page. Activity history includes saved logs beyond a trace's preview window. The selected trace initially shows 100 spans; related-trace navigation also loads its exact target span and up to eight missing ancestors. MCP overview counts cover the latest loaded operations in scope. Global token totals include stored history and repeated/cached context; costs remain unreported when telemetry has no price. History controls require the updated receiver; if a separate receiver is already running, restart it after updating.
+The feed waits two seconds between refreshes and preserves the event being read as new records arrive. Independent reads use at most four workers; inventory and findings are cached for five seconds unless their scope changes. Only the visible view is rendered; hidden views refresh when activated. Activity, MCP Calls, and Traces have **Older**, **Newer**, and **Latest** controls (shortcuts **]**, **[**, and **l**) to browse saved records in pages of 200 events, 100 MCP calls, or 100 traces. Search and scope changes return that view to its latest matching page. Activity history includes saved logs beyond a trace's preview window. The selected trace initially shows 100 spans; related-trace navigation also loads its exact target span and up to eight missing ancestors. MCP overview counts cover the latest loaded operations in scope. Global token totals include stored history and repeated/cached context; costs remain unreported when telemetry has no price. History controls require the updated receiver; if a separate receiver is already running, restart it after updating.
 
 Drag across inspector text to highlight it, then press **Ctrl+C** (or **Cmd+C** where the terminal forwards it) to copy the selected plain text. Display updates are held while text is selected; click or press **Esc** to clear the selection and resume. **c** copies the selection, or the current event/call/details when nothing is selected. The Activity and MCP inspectors also have copy buttons. Clipboard commands run in the background and use Wayland, X11, macOS, or Windows tools when available, falling back to a terminal clipboard request. When using a remote terminal, clipboard behavior depends on that terminal's support. Narrow terminals stack the list and inspector; **e** expands the inspector for reading.
 

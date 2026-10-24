@@ -22,8 +22,26 @@ This does not erase content already stored. To stop native session discovery, us
 
 The SDK launcher omits prompts and model responses by default. Content capture is opt-in. The metadata-only setting for native session discovery is separate from SDK capture options.
 
+## Local UI preferences and exports
+
+The cockpit saves only theme, active view, and non-sensitive filter flags in its
+local UI preferences. It does not save searches, session scope, credentials, or
+selected evidence there. Set `AGENTURM_UI_PREFERENCES=0` to disable persistence.
+
+Pressing `x` opens an export privacy preview; no file is created until explicit
+confirmation. Exports can contain private recorded content and are not an
+additional redaction pass. They include currently loaded selected evidence, not
+complete session history. New files are owner-only and existing files are not
+overwritten. You control whether and where they are shared.
+
 ## Network and retention
 
 The receiver binds to `127.0.0.1` by default. Do not expose it to a network without authentication and a protected TLS/reverse-proxy path. Retention is configurable; see [receiver setup](receiver.md).
+
+Retention performs logical deletion, not guaranteed secure erasure. Deleted
+content may remain in SQLite free pages, journals, filesystem snapshots, or
+backups. Protect the database and its backups as sensitive files; a retention
+setting is not a substitute for disk encryption or an appropriate disposal
+policy.
 
 Token totals reflect emitted telemetry and may include cached context. Costs remain unknown when the producer does not report them. Neither token nor cost totals should be treated as a billing statement.

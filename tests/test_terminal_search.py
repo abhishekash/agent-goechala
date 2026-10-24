@@ -288,9 +288,14 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
         app = ObservatoryApp(feed)
         async with app.run_test(size=(180, 50)) as pilot:
             await pilot.pause()
+            # Trace inspectors are built on activation, not behind Agents.
+            app.action_page('traces')
+            await pilot.pause()
             self.assertEqual(app.query_one('#span-tree').cursor_node.data['span_id'], 'span-1')
             self.assertTrue(app.query_one('#span-tree').cursor_node.is_expanded)
             self.assertEqual(app.inspector_signatures['span-info'][0], 'agent.run')
+            app.action_page('agents')
+            await pilot.pause()
             agents = app.query_one('#agent-table')
             agents.move_cursor(row=1)
             await pilot.pause()
@@ -399,12 +404,12 @@ class CockpitSearchTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one('#agent-table').row_count, 1)
             self.assertEqual(app.selected_source, 'source-2')
             self.assertEqual(feed.query, '')
-            self.assertEqual(app.query_one('#mcp-table').row_count, 1)
             self.assertEqual(len(feed.snapshot.activity), 1)
 
             app.action_page('mcp')
             app.action_search()
             await pilot.pause()
+            self.assertEqual(app.query_one('#mcp-table').row_count, 1)
             self.assertEqual(app.focused.id, 'search-mcp')
             self.assertEqual(app.query_one('#search-mcp').value, '')
             field = app.query_one('#search-mcp')
