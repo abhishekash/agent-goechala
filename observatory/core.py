@@ -1484,7 +1484,7 @@ class Store:
                 execution_spans = db.execute(
                     f"""SELECT trace_id,span_id,start_ns,end_ns,attributes FROM spans
                         WHERE trace_id IN ({placeholders})
-                        AND json_extract(attributes,'$.\"gen_ai.tool.type\"')='MCPTool'
+                        AND lower(json_extract(attributes,'$.\"gen_ai.tool.type\"'))='mcptool'
                         AND json_extract(attributes,'$.\"gen_ai.tool.name\"') IS NOT NULL""",
                     call_trace_ids,
                 ).fetchall()
