@@ -37,30 +37,26 @@ class BrandingTest(unittest.IsolatedAsyncioTestCase):
                 self.assertLessEqual(masthead.size.height, 2 if size[1] >= 36 else 1)
                 self.assertEqual(app.query_one('#brand').size.height, 1)
 
-    async def test_shortcut_hints_sit_next_to_the_scope(self):
+    async def test_complete_shortcut_legend_stays_at_the_top(self):
         app = ObservatoryApp(ManualFeed())
         async with app.run_test(size=(160, 48)) as pilot:
             for size in ((160, 48), (120, 40), (100, 40), (80, 24)):
                 await pilot.resize_terminal(*size)
                 await pilot.pause()
                 hints = app.query_one('#shortcuts')
-                scope = app.query_one('#scope')
-                if size[0] >= 120:
-                    self.assertTrue(hints.display, f'{size}: hints should be visible')
-                    self.assertLessEqual(scope.region.right, hints.region.x)
-                    rendered = hints.render_line(0).text
-                    for label in ('search', 'trace', 'palette'):
-                        self.assertIn(label, rendered)
-                else:
-                    self.assertFalse(hints.display, f'{size}: hints should be hidden')
+                self.assertTrue(hints.display, f'{size}: hints should be visible')
+                self.assertLess(hints.region.y, app.query_one('#pages').region.y)
+                rendered = '\n'.join(hints.render_line(row).text for row in range(hints.size.height))
+                for label in ('views', 'search', 'expand', 'trace', 'copy', 'pause',
+                              'diagnostics', 'export', 'quit', 'session activity',
+                              'reset', 'reviews', 'newer', 'older', 'latest', 'back', 'palette'):
+                    self.assertIn(label, rendered, f'{size}: missing {label}')
 
-    async def test_footer_keeps_the_full_key_map(self):
+    async def test_bottom_footer_is_removed(self):
         app = ObservatoryApp(ManualFeed())
         async with app.run_test(size=(160, 48)) as pilot:
             await pilot.pause()
-            labels = {str(key.description) for key in app.query('FooterKey')}
-            for label in ('Search', 'Expand', 'Trace', 'Copy', 'Pause', 'Quit', 'palette'):
-                self.assertIn(label, labels)
+            self.assertEqual(len(app.query('Footer')), 0)
 
     async def test_masthead_lockup_is_centered(self):
         app = ObservatoryApp(ManualFeed())

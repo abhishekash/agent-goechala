@@ -23,7 +23,7 @@ from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
 from textual.screen import Screen
 from textual.strip import Strip
-from textual.widgets import Button, Checkbox, DataTable, Footer, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
+from textual.widgets import Button, Checkbox, DataTable, Input, RichLog, Select, Static, TabbedContent, TabPane, Tree
 
 from .terminal import clean, number, trace_name
 from .branding import NAME, AMBER, LAVENDER, MINT, ICE, masthead, shortcut_hints, SCOPE_HINTS
@@ -673,8 +673,7 @@ class ObservatoryApp(App):
     #controls { height: 3; margin: 0 2; align-vertical: middle; }
     #scope-label { width: 6; height: 1; margin-top: 1; color: $agent-muted; }
     #scope { width: 32; margin-right: 1; }
-    #shortcuts { display: none; height: 1; margin-top: 1; margin-right: 2; color: $agent-muted; text-wrap: nowrap; }
-    .with-hints #shortcuts { display: block; }
+    #shortcuts { height: 2; max-height: 2; margin: 0 2; padding: 0 1; color: $agent-muted; text-wrap: wrap; overflow: hidden; }
     SelectCurrent { background: $agent-panel; border: tall $agent-border; }
     SelectCurrent #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
     Select:focus > SelectCurrent { border: tall $agent-primary; background-tint: transparent; }
@@ -749,16 +748,12 @@ class ObservatoryApp(App):
     #span-tree { height: 1fr; min-height: 4; background: $agent-surface; scrollbar-size: 1 1; }
     #span-info { height: 10; border-top: solid $agent-border-subtle; }
     #health { height: 1; padding: 0 2; color: $agent-muted; }
-    Footer { background: $agent-panel; color: $agent-muted; }
-    FooterKey { background: $agent-footer-key; color: $agent-primary; }
-    FooterKey > .footer-key--key { background: $agent-primary; color: $agent-on-primary; text-style: bold; }
-    FooterKey > .footer-key--description { background: $agent-panel; color: $agent-label; }
-    FooterLabel { background: $agent-panel; color: $agent-label; }
     .narrow #masthead { padding: 0 1; }
     .narrow #summary { margin: 0 1 1 1; }
     .narrow .stat { padding: 0 1; }
     .narrow #controls { margin: 0 1; }
     .narrow #scope { width: 32; }
+    .narrow #shortcuts { height: 3; max-height: 3; margin: 0 1; padding: 0; }
     .narrow #pages { margin: 0 1; }
     .narrow Tab { padding: 0 1; }
     .narrow #agent-bottom { height: 12; }
@@ -766,6 +761,7 @@ class ObservatoryApp(App):
     .narrow .list { width: 100%; height: 1fr; margin-right: 0; margin-bottom: 1; }
     .narrow .detail, .narrow #trace-detail { width: 100%; height: 1fr; }
     .small #summary { height: 6; grid-size: 2; }
+    .small #shortcuts { height: 4; max-height: 4; }
     .small #agent-bottom { height: 9; }
     .small #pause { width: 9; }
     .compact #masthead { height: 1; border-bottom: none; }
@@ -875,10 +871,10 @@ class ObservatoryApp(App):
             yield Button('← Back',id='history-back',disabled=True,tooltip='Return to the event you opened · Alt+Left')
             yield Static('Scope',id='scope-label')
             yield Select([('All agent sessions','all')],value='all',allow_blank=False,id='scope')
-            yield Static(shortcut_hints(SCOPE_HINTS),id='shortcuts')
             yield Static('',id='controls-spacer')
             yield Checkbox('Reviews',id='reviews')
             yield Button('Pause',id='pause')
+        yield Static(shortcut_hints(SCOPE_HINTS),id='shortcuts',markup=False)
         with TabbedContent(initial='agents',id='pages'):
             with TabPane('1  Agents',id='agents'):
                 yield self.results('agents','agent-table','Filter agents by task, project, model, or session…')
@@ -937,7 +933,6 @@ class ObservatoryApp(App):
                             yield Button(Text('Copy finding · c'),id='finding-copy')
                             yield Button(Text('Expand · e'),id='expand-findings',classes='expand-button')
         yield Static('Connecting to receiver…',id='health',markup=False)
-        yield Footer()
 
     def get_default_screen(self):
         return ObservatoryScreen()
@@ -981,8 +976,6 @@ class ObservatoryApp(App):
             self.query_one('#search-'+page).tooltip='Search this view · / to focus · Esc to return'
         self.query_one('#reviews').tooltip='Include internal approval review sessions'
         self.query_one('#pause').tooltip='Pause display updates · collection continues'
-        # The hints keep their own width so the scope and controls keep theirs.
-        self.query_one('#shortcuts').styles.width=cell_len(shortcut_hints(SCOPE_HINTS).plain)
         for log in self.query(SelectableRichLog):
             log.tooltip='Drag to select text · Ctrl+C copies selection · c copies details'
         self.query_one('#host-detail').styles.height=8
@@ -1028,7 +1021,6 @@ class ObservatoryApp(App):
         size=size or self.size
         self.screen.set_class(size.width<140,'narrow')
         self.screen.set_class(size.width<100,'small')
-        self.screen.set_class(size.width>=120,'with-hints')
         self.screen.set_class(size.height<36,'compact')
         for brand in self.query('#brand'):
             brand.update(themed_text(brand,masthead(demo=getattr(self,'demo_mode',False),compact=size.height<36 or size.width<100)))
