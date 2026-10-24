@@ -569,6 +569,23 @@ class ObservatoryTest(unittest.TestCase):
             self.assertEqual(call["output"], result)
             self.assertEqual(call["source"], "agent + MCP spans")
 
+    def test_mcp_execution_type_is_case_insensitive(self):
+        transport = normalize_native({"trace_id": TID, "span_id": ROOT,
+            "name": "MCP send tools/call lookup_release", "start_unix_nano": 100,
+            "end_unix_nano": 200, "attributes": {"mcp.method.name": "tools/call",
+                "mcp.tool.name": "lookup_release"}, "events": []})
+        execution = normalize_native({"trace_id": TID, "span_id": CHILD,
+            "name": "execute_tool lookup_release", "start_unix_nano": 100,
+            "end_unix_nano": 210, "attributes": {"gen_ai.tool.type": "McpTool",
+                "gen_ai.tool.name": "lookup_release",
+                "gen_ai.tool.call.arguments": json.dumps({"project": "demo"}),
+                "gen_ai.tool.call.result": json.dumps(
+                    {"structuredContent": {"result": "demo: ready"}})}, "events": []})
+        self.store.ingest([transport, execution])
+        call, = self.store.mcp_page()["calls"]
+        self.assertEqual(call["arguments"], {"project": "demo"})
+        self.assertEqual(call["output"], {"structuredContent": {"result": "demo: ready"}})
+
     def test_mcp_inventory_includes_discovery_resource_and_prompt_methods(self):
         examples = [
             (TID, ROOT, {"rpc.system": "mcp", "rpc.method": "tools/list",

@@ -192,11 +192,28 @@ class GoogleAdkOtelEndToEndTests(unittest.TestCase):
         self.assertEqual(mcp_page["summary"]["unknown_server_errors"], 0)
         self.assertEqual(tool_call["trace_id"], run["trace_id"])
         self.assertEqual(tool_call["session_id"], "adk-session-17")
-        self.assertEqual(tool_call["arguments"], {"project": "demo"})
-        self.assertEqual(
-            tool_call["output"]["structuredContent"],
-            {"result": "demo: ready"},
+        execution_attrs = tool_spans[0]["attributes"]
+        arguments_exported = any(
+            execution_attrs.get(key) is not None
+            for key in ("gen_ai.tool.call.arguments", "gcp.vertex.agent.tool_call_args", "input.value")
         )
+        output_exported = any(
+            execution_attrs.get(key) is not None
+            for key in ("gen_ai.tool.call.result", "gcp.vertex.agent.tool_response", "output.value")
+        )
+        if arguments_exported:
+            self.assertEqual(tool_call["arguments"], {"project": "demo"})
+        else:
+            # ADK 2.13 emits the execute_tool span without call arguments.
+            # The cockpit must show the absence instead of inventing them.
+            self.assertEqual(tool_call["arguments"], "")
+        if output_exported:
+            self.assertEqual(
+                tool_call["output"]["structuredContent"],
+                {"result": "demo: ready"},
+            )
+        else:
+            self.assertEqual(tool_call["output"], "")
         scoped_mcp_page = self.store.mcp_page(session_id="adk-session-17")
         self.assertEqual(scoped_mcp_page["summary"]["calls"], len(expected_methods))
         self.assertTrue(all(call["trace_id"] == run["trace_id"]

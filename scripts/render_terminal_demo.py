@@ -84,6 +84,7 @@ class FakeFeed(Feed):
         self.selected_trace=trace_id; self.selected_span_id=None; self.pinned_trace=False
         self.session_id=''; self.service=''; self.query=''
     def request_refresh(self):
+        self.snapshot.activity_prompts = self.activity_prompts
         self.snapshot.activity_results = [row for row in self.snapshot.activity
             if (not self.service or row.get('service') == self.service)
             and (not self.session_id or row.get('session_id') == self.session_id)

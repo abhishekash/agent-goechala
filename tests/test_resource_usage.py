@@ -55,6 +55,9 @@ class RenderingWorkBudgetTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(140, 42)) as pilot:
             await pilot.pause()
             app.refresh_timer.stop()
+            # Hidden tabs deliberately do no view-model/render work now.
+            app.action_page('activity')
+            await pilot.pause()
             table = app.query_one('#activity-table')
             feed.api.activity[0]['subject'] = 'one changed command'
             feed.refresh()

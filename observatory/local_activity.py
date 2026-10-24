@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from itertools import islice
 from pathlib import Path
 
 from .findings import _safe_text, _SENSITIVE_FIELD, _TOKEN_FIELD
+from .native_json import loads
 
 CONTENT_LIMIT = 8000
 
@@ -15,7 +17,7 @@ def safe(value, limit=CONTENT_LIMIT):
     if isinstance(value, dict):
         value = {str(key): "[REDACTED]" if _SENSITIVE_FIELD.search(str(key)) or _TOKEN_FIELD.search(str(key))
                  else "[opaque payload omitted]" if str(key) in {"encrypted_content", "signature", "raw_content"} or str(key) == "data" and isinstance(child, str) and len(child) > 1000
-                 else safe(child, 2000) for key, child in list(value.items())[:60]}
+                 else safe(child, 2000) for key, child in islice(value.items(), 60)}
         value = json.dumps(value, ensure_ascii=False, indent=2)
     elif isinstance(value, list):
         value = json.dumps([safe(child, 2000) for child in value[:60]], ensure_ascii=False, indent=2)
@@ -46,8 +48,8 @@ def mcp_attributes(name):
 def mcp_failed(value):
     if isinstance(value, str):
         try:
-            value = json.loads(value)
-        except ValueError:
+            value = loads(value)
+        except (ValueError, OverflowError, RecursionError):
             return False
     return isinstance(value, dict) and bool(value.get("isError") or value.get("is_error"))
 
@@ -104,10 +106,11 @@ def codex_activity(session, row, stamp):
         name = str(payload.get("name") or "Tool")
         args = payload.get("arguments") or payload.get("input") or ""
         try:
-            parsed = json.loads(args) if isinstance(args, str) else args
-        except (ValueError, TypeError):
+            parsed = loads(args) if isinstance(args, str) else args
+        except (ValueError, TypeError, OverflowError, RecursionError):
             parsed = {}
-        session.tool_inputs[str(payload.get("call_id") or payload.get("id"))] = (name, safe(args))
+        # Results only need the tool name, not another retained argument payload.
+        session.tool_inputs[str(payload.get("call_id") or payload.get("id"))] = (name, "", session.turn)
         subject = name
         domain = "tool"
         mcp = mcp_attributes(name)
@@ -126,14 +129,16 @@ def codex_activity(session, row, stamp):
                         call_id=payload.get("call_id") or payload.get("id") if mcp else None))
     elif kind == "response_item" and event in {"function_call_output", "custom_tool_call_output"}:
         key = str(payload.get("call_id") or payload.get("id"))
-        name, _ = session.tool_inputs.get(key, ("Tool", ""))
+        pending = session.calls.get(key)
+        fallback = (pending[0], "", pending[2]) if pending else ("Tool", "", session.turn)
+        name, _, call_turn = session.tool_inputs.pop(key, fallback)
         mcp = mcp_attributes(name)
         output = payload.get("output") or ""
         pending = session.calls.pop(key, None) if mcp else None
         out.append(emit(session, row, stamp, "mcp" if mcp else "tool", "result", name,
                         {"result": output} if mcp else output,
                         "error" if mcp_failed(output) else "success" if mcp else "observed", mcp,
-                        call_id=key if mcp else None, turn=pending[2] if pending else None))
+                        call_id=key if mcp else None, turn=pending[2] if pending else call_turn))
     elif kind == "event_msg" and event in {"task_started", "task_complete", "task_aborted"}:
         action = "started" if event == "task_started" else "completed" if event == "task_complete" else "interrupted"
         out.append(emit(session, row, stamp, "agent", action, session.project or session.runtime,
@@ -227,18 +232,18 @@ def claude_activity(session, row, stamp):
             mcp = mcp_attributes(name)
             if mcp:
                 domain, subject = "mcp", mcp["mcp.server.name"]
-            session.tool_inputs[str(block.get("id"))] = (name, safe(subject, 500))
+            session.tool_inputs[str(block.get("id"))] = (name, safe(subject, 500) if session.capture_details else "", session.turn)
             out.append(emit(session, row, stamp, domain, name, subject if session.capture_details else name,
                 {"arguments": args} if mcp else args, "started", {"tool.name": name, **mcp},
                 call_id=block.get("id") if mcp else None))
         elif block.get("type") == "tool_result":
-            name, subject = session.tool_inputs.get(str(block.get("tool_use_id")), ("Tool", "Tool result"))
+            name, subject, call_turn = session.tool_inputs.pop(str(block.get("tool_use_id")), ("Tool", "Tool result", session.turn))
             mcp = mcp_attributes(name)
             pending = session.calls.pop(block.get("tool_use_id"), None)
             output = block.get("content") or ""
             out.append(emit(session, row, stamp, "mcp" if mcp else "tool", name+" result", subject if session.capture_details else name,
                 {"result": output} if mcp else output, "error" if block.get("is_error") else "success", mcp,
-                call_id=block.get("tool_use_id") if mcp else None, turn=pending[2] if pending else None))
+                call_id=block.get("tool_use_id") if mcp else None, turn=pending[2] if pending else call_turn))
         elif block.get("type") == "thinking":
             out.append(emit(session, row, stamp, "agent", "processing", "Model processing"))
     if row.get("type") == "system":

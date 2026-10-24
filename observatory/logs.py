@@ -233,7 +233,7 @@ def _normalize_cursor_event(event_name, attrs, body=None):
 
 def _log(raw, service, resource, scope):
     timestamp = int(raw.get("time_unix_nano") or raw.get("observed_time_unix_nano") or time.time_ns())
-    if timestamp < 0:
+    if not 0 <= timestamp <= 2**63 - 1:
         raise ValueError("invalid log timestamp")
     attrs = raw.get("attributes") or {}
     if not isinstance(attrs, dict):

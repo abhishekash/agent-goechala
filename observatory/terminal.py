@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
+from .feed_requests import FeedScope, RequestBatch
+
 
 class CockpitError(Exception):
     pass
@@ -58,9 +60,11 @@ def trace_name(trace):
 
 
 class Api:
+    MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
     def __init__(self, endpoint, token=None):
         parsed = urlsplit(endpoint)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.query or parsed.fragment:
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
             raise CockpitError("Use a receiver HTTP address for --endpoint.")
         self.endpoint = endpoint.rstrip("/")
         self.token = token
@@ -69,17 +73,19 @@ class Api:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         request = urllib.request.Request(self.endpoint + path, headers=headers)
         with urllib.request.urlopen(request, timeout=3) as response:
-            return json.load(response)
+            raw = response.read(self.MAX_RESPONSE_BYTES + 1)
+        if len(raw) > self.MAX_RESPONSE_BYTES:
+            raise CockpitError('Receiver response exceeded the 16 MiB limit. Narrow the selected scope.')
+        return json.loads(raw)
 
 
 class LocalReceiver:
     def __init__(self, db_path, port, token, local_agents=True, metadata_only=False):
-        from http.server import ThreadingHTTPServer
         from .core import Store
-        from .server import handler_for
+        from .server import BoundedHTTPServer, handler_for
         self.store = Store(db_path, async_derived_refresh=True)
         try:
-            self.server = ThreadingHTTPServer(("127.0.0.1", port), handler_for(self.store, token, quiet=True))
+            self.server = BoundedHTTPServer(("127.0.0.1", port), handler_for(self.store, token, quiet=True))
         except OSError:
             self.store.close()
             raise
@@ -127,6 +133,7 @@ class Snapshot:
     mcp_results: list | None = None
     queries: dict = field(default_factory=dict)
     pagination: dict = field(default_factory=dict)
+    activity_prompts: bool = False
 
 
 class Feed:
@@ -160,16 +167,22 @@ class Feed:
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.thread = threading.Thread(target=self._loop, name="observatory-terminal-feed", daemon=True)
+        self._requests = None
 
     def refresh(self):
-        service, query, errors_only, selected = self.service, self.query, self.errors_only, self.selected_trace
-        activity_query, mcp_query = self.activity_query, self.mcp_query
-        requested_trace, requested_span = selected, self.selected_span_id
-        session_id, include_reviews = self.session_id, self.include_reviews
+        requested_scope = FeedScope.capture(self)
+        service, query, errors_only, selected = (requested_scope.service, requested_scope.query,
+                                                requested_scope.errors_only, requested_scope.selected_trace)
+        activity_query, mcp_query = requested_scope.activity_query, requested_scope.mcp_query
+        activity_prompts = requested_scope.activity_prompts
+        requested_span = requested_scope.selected_span_id
+        session_id, include_reviews = requested_scope.session_id, requested_scope.include_reviews
         for page, text in (('activity',activity_query),('mcp',mcp_query),('traces',query)):
             scope=(service,session_id,text,include_reviews)
             if page=='activity':
-                scope+=(self.activity_prompts,)
+                scope+=(activity_prompts,)
+            elif page=='traces':
+                scope+=(errors_only,)
             if self.history_scopes.get(page)!=scope:
                 self.history[page]=[None]
                 self.history_scopes[page]=scope
@@ -178,20 +191,30 @@ class Feed:
         def page_result(page, response):
             pagination[page]={'page':len(history[page]), 'next_cursor':response.get('next_cursor'),
                               'supported':'next_cursor' in response}
+        requests = RequestBatch(self.api, self.stop)
+        self._requests = requests
+        get = requests.get
         try:
-            local_status = self.api.get("/api/health").get("local_agents", {})
-            totals = self.api.get("/api/metrics")
-            agents = self.api.get("/api/connections")["connections"]
+            activity_params = {"limit": 200, "service": service, "session_id": session_id,
+                               "include_reviews":int(include_reviews)}
+            params = {"limit": 100, "service": service, "session_id": session_id, "q": query,
+                      "cursor":history['traces'][-1] or '', 'include_reviews':int(include_reviews)}
+            if errors_only:
+                params["status"] = "ERROR"
+            trace_path = "/api/traces?" + urlencode(params)
+            requests.prefetch(("/api/health", "/api/metrics", "/api/connections",
+                               "/api/activity?" + urlencode(activity_params), trace_path))
+            local_status = get("/api/health").get("local_agents", {})
+            totals = get("/api/metrics")
+            agents = get("/api/connections")["connections"]
             try:
-                activity_params = {"limit": 200, "service": service, "session_id": session_id,
-                                   "include_reviews":int(include_reviews)}
-                activity_page = self.api.get("/api/activity?" + urlencode(activity_params))
+                activity_page = get("/api/activity?" + urlencode(activity_params))
                 activity = activity_page['activity']
                 result_params = dict(activity_params)
-                if self.activity_prompts:
+                if activity_prompts:
                     result_params.update(domain='message', action='user')
-                if activity_query or history['activity'][-1] or self.activity_prompts:
-                    activity_page = self.api.get("/api/activity?" + urlencode({**result_params,
+                if activity_query or history['activity'][-1] or activity_prompts:
+                    activity_page = get("/api/activity?" + urlencode({**result_params,
                         "q":activity_query,"cursor":history['activity'][-1] or ''}))
                 activity_results = activity_page['activity']
                 page_result('activity',activity_page)
@@ -201,15 +224,26 @@ class Feed:
                 activity, activity_results = [], []
             scope = (service, session_id, mcp_query, include_reviews, history['mcp'])
             if self.extra_cache is None or scope != self.extra_scope or time.monotonic()-self.extra_updated>self.EXTRA_POLL_SECONDS:
-                sessions = self.api.get('/api/sessions?limit=500')['sessions']
+                mcp_params = {'limit':100,'service':service,'session_id':session_id,
+                              'include_reviews':int(include_reviews)}
+                metric_params = {'limit': 500, 'latest': 1}
+                if service:
+                    metric_params['service'] = service
+                usage_params = {'days': 7, 'step': 'day'}
+                if service:
+                    usage_params['service'] = service
+                if session_id:
+                    usage_params['session_id'] = session_id
+                requests.prefetch(('/api/sessions?limit=500', '/api/mcp?'+urlencode(mcp_params),
+                    '/api/metric-catalog?limit=500', '/api/measurements?'+urlencode(metric_params),
+                    '/api/usage-series?'+urlencode(usage_params)))
+                sessions = get('/api/sessions?limit=500')['sessions']
                 try:
-                    mcp_params = {'limit':100,'service':service,'session_id':session_id,
-                                  'include_reviews':int(include_reviews)}
-                    mcp_page = self.api.get('/api/mcp?'+urlencode(mcp_params))
+                    mcp_page = get('/api/mcp?'+urlencode(mcp_params))
                     mcp = mcp_page['calls']
                     mcp_summary = mcp_page.get('summary', {})
                     if mcp_query or history['mcp'][-1]:
-                        mcp_page = self.api.get('/api/mcp?'+urlencode({**mcp_params,'q':mcp_query,
+                        mcp_page = get('/api/mcp?'+urlencode({**mcp_params,'q':mcp_query,
                             'cursor':history['mcp'][-1] or ''}))
                     mcp_results = mcp_page['calls']
                     mcp_available = True
@@ -218,23 +252,15 @@ class Feed:
                         raise
                     mcp,mcp_results,mcp_available,mcp_page,mcp_summary=[],[],False,{},{}
                 try:
-                    metric_catalog = self.api.get('/api/metric-catalog?limit=500')['metrics']
-                    metric_params = {'limit': 500, 'latest': 1}
-                    if service:
-                        metric_params['service'] = service
-                    metric_points = self.api.get('/api/measurements?' + urlencode(metric_params))['points']
+                    metric_catalog = get('/api/metric-catalog?limit=500')['metrics']
+                    metric_points = get('/api/measurements?' + urlencode(metric_params))['points']
                     metrics_available = True
                 except urllib.error.HTTPError as exc:
                     if exc.code != 404:
                         raise
                     metric_catalog, metric_points, metrics_available = [], [], False
                 try:
-                    usage_params = {'days': 7, 'step': 'day'}
-                    if service:
-                        usage_params['service'] = service
-                    if session_id:
-                        usage_params['session_id'] = session_id
-                    usage = self.api.get('/api/usage-series?' + urlencode(usage_params))
+                    usage = get('/api/usage-series?' + urlencode(usage_params))
                     usage_series = usage.get('points', [])
                     usage_service = usage.get('service')
                     usage_session_id = usage.get('session_id')
@@ -251,11 +277,7 @@ class Feed:
              usage_session_id)=self.extra_cache
             page_result('mcp',mcp_page)
             metric_history=[]
-            params = {"limit": 100, "service": service, "session_id": session_id, "q": query,
-                      "cursor":history['traces'][-1] or '', 'include_reviews':int(include_reviews)}
-            if errors_only:
-                params["status"] = "ERROR"
-            trace_page = self.api.get("/api/traces?" + urlencode(params))
+            trace_page = get(trace_path)
             traces = trace_page['traces']
             page_result('traces',trace_page)
             if not include_reviews:
@@ -265,38 +287,40 @@ class Feed:
                 mcp = [item for item in mcp if item.get('service')!='codex-review']
                 mcp_results = [item for item in mcp_results if item.get('service')!='codex-review']
             traces,activity = traces[:100],activity[:200]
-            if not self.pinned_trace and selected not in {item["trace_id"] for item in traces}:
+            if not requested_scope.pinned_trace and selected not in {item["trace_id"] for item in traces}:
                 selected = traces[0]["trace_id"] if traces else None
-            detail = self.api.get("/api/traces/" + selected + "?span_limit=100") if selected else {}
+            detail = get("/api/traces/" + selected + "?span_limit=100") if selected else {}
             if selected and requested_span:
                 wanted=requested_span
                 known={span['span_id'] for span in detail.get('spans',[])}
                 for _ in range(8):
                     if not wanted or wanted in known:break
-                    page=self.api.get('/api/traces/'+selected+'/spans?'+urlencode({'limit':100,'q':wanted}))
+                    page=get('/api/traces/'+selected+'/spans?'+urlencode({'limit':100,'q':wanted}))
                     span=next((item for item in page['spans'] if item['span_id']==wanted),None)
                     if not span:break
                     detail['spans'].append(span);known.add(wanted)
                     wanted=span.get('parent_span_id')
             findings = detail.get("findings", [])
             if not selected:
-                findings = self.api.get("/api/findings?limit=8")["findings"]
+                findings = get("/api/findings?limit=8")["findings"]
             findings_scope=history['findings']
             if (self.findings_cache is None or self.findings_scope!=findings_scope or
                     time.monotonic()-self.findings_updated>self.EXTRA_POLL_SECONDS):
                 finding_params={'limit':100,'cursor':findings_scope[-1] or ''}
-                finding_page=self.api.get('/api/findings?'+urlencode(finding_params))
+                finding_page=get('/api/findings?'+urlencode(finding_params))
                 self.findings_cache=finding_page
                 self.findings_scope=findings_scope
                 self.findings_updated=time.monotonic()
             else:
                 finding_page=self.findings_cache
             page_result('findings',finding_page)
+            if self.stop.is_set():
+                return
             # A filter changed while the HTTP reads were in flight; discard the older view.
-            if (service, query, activity_query, mcp_query, errors_only, session_id, include_reviews) != (self.service, self.query, self.activity_query, self.mcp_query, self.errors_only, self.session_id, self.include_reviews):
+            if requested_scope != FeedScope.capture(self):
                 self.wake.set()
                 return
-            if self.selected_trace!=requested_trace or self.selected_span_id!=requested_span or history!={page:tuple(cursors) for page,cursors in self.history.items()}:
+            if history!={page:tuple(cursors) for page,cursors in self.history.items()}:
                 self.wake.set()
                 return
             self.selected_trace = selected
@@ -309,8 +333,11 @@ class Feed:
                                      metrics_available=metrics_available,
                                      activity_results=activity_results[:200],mcp_results=mcp_results,
                                      finding_results=finding_page.get('findings',[]),
-                                     queries={'activity':activity_query,'mcp':mcp_query,'traces':query},pagination=pagination)
+                                      queries={'activity':activity_query,'mcp':mcp_query,'traces':query},pagination=pagination,
+                                      activity_prompts=activity_prompts)
         except Exception as exc:
+            if self.stop.is_set():
+                return
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
                 message = "Receiver requires authentication. Set OBSERVATORY_TOKEN and restart."
             else:
@@ -318,6 +345,9 @@ class Feed:
             old = self.snapshot
             from dataclasses import replace
             self.snapshot = replace(old,error=message)
+        finally:
+            requests.close()
+            self._requests = None
 
     def metric_history(self, metric, limit=100):
         params={'limit':max(1,min(500,int(limit)))}
@@ -357,7 +387,11 @@ class Feed:
     def close(self):
         self.stop.set()
         self.wake.set()
-        self.thread.join(timeout=4)
+        requests = self._requests
+        if requests is not None:
+            requests.cancel()
+        if getattr(self.thread, 'ident', None) is not None:
+            self.thread.join(timeout=4)
 
 
 def agent_rows(snapshot):
@@ -431,18 +465,20 @@ def print_snapshot(feed):
     snapshot = feed.snapshot
     totals = snapshot.totals
     def token_count(record, key):
-        if record.get(key + '_reported') is False:
+        if record.get(key + '_reported') is False or record.get(key) is None:
             return 'Not reported'
         return number(record.get(key))
-    print("AGENT AGENTURM  " + feed.api.endpoint)
+    print("AGENTURM  " + feed.api.endpoint)
     if snapshot.local_status.get("enabled"):
         mode = "bounded, redacted content" if snapshot.local_status.get('capture_content') else "metadata only"
         opencode_count=sum(entry.get('runtime')=='OpenCode' for entry in snapshot.local_status.get('sessions',[]))
         print(f"Sources: local Codex / Claude Code logs · {snapshot.local_status.get('sources', 0)} files · "
               f"OpenCode · {opencode_count} recent sessions · {mode}")
+    known_cost = totals.get('known_cost_usd')
+    cost_text = 'Not reported' if known_cost is None else f'${known_cost:.4f}'
     print(f"Runs {number(totals.get('runs'))}  Spans {number(totals.get('spans'))}  "
           f"Tokens {token_count(totals, 'input_tokens')} in / {token_count(totals, 'output_tokens')} out  "
-          f"Errors {number(totals.get('errors'))}  Known cost ${totals.get('known_cost_usd', 0):.4f}")
+          f"Errors {number(totals.get('errors'))}  Known cost {cost_text}")
     for title, rows in (
         ("CONNECTED AGENTS", [f"{label}  {state}" for _, label, state in agent_rows(snapshot)[1:]]),
         ("RECENT TRACES", [f"{item['status']:10} {trace_name(item)}  {token_count(item, 'input_tokens')} in / {token_count(item, 'output_tokens')} out" for item in snapshot.traces[:10]]),

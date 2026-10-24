@@ -359,7 +359,7 @@ def normalize_native(raw, service="agent-harness"):
     if parent:
         parent = _id(parent, SPAN_ID, "parent_span_id")
     start, end = int(raw["start_unix_nano"]), int(raw["end_unix_nano"])
-    if start < 0 or end < start:
+    if start < 0 or end < start or end > 2**63 - 1:
         raise ValueError("invalid span timestamps")
     attrs = raw.get("attributes") or {}
     events = raw.get("events") or []
@@ -420,11 +420,22 @@ class Store:
         self.path = str(path)
         self._async_derived_refresh = bool(async_derived_refresh)
         self._derived_condition = threading.Condition()
+        # Refresh reads and cache writes must not straddle a retention delete.
+        self._derived_lock = threading.RLock()
         self._derived_pending = {}
         self._derived_stopping = False
         self._derived_thread = None
         self.last_derived_error = None
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # SQLite otherwise creates the file using the process umask, exposing
+        # captured content until the chmod at the end of initialization.
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
+        os.chmod(self.path, 0o600)
         with self._connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS spans (
@@ -439,6 +450,7 @@ class Store:
                     PRIMARY KEY (trace_id, span_id));
                 CREATE INDEX IF NOT EXISTS spans_time ON spans(end_ns DESC);
                 CREATE INDEX IF NOT EXISTS spans_service_time ON spans(service,end_ns);
+                CREATE INDEX IF NOT EXISTS spans_trace_start ON spans(trace_id,start_ns,span_id);
                 CREATE TABLE IF NOT EXISTS agent_connections (
                     source_id TEXT PRIMARY KEY, service TEXT NOT NULL, runtime TEXT NOT NULL,
                     integrations TEXT NOT NULL, capture_content INTEGER NOT NULL,
@@ -504,6 +516,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS schema_meta (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL);
             """)
+            from .storage_derived import initialize
+            initialize(db)
             session_expr = _session_sql_expression()
             db.execute(f"CREATE INDEX IF NOT EXISTS logs_session_time "
                        f"ON logs ({session_expr},time_ns DESC,digest DESC) "
@@ -625,7 +639,8 @@ class Store:
 
     def _backfill_summaries(self):
         with self._connect() as db:
-            complete = db.execute("SELECT 1 FROM schema_meta WHERE key='trace_derived_v11'").fetchone()
+            complete = db.execute("""SELECT 1 FROM schema_meta WHERE key='trace_derived_v12'
+                AND EXISTS (SELECT 1 FROM schema_meta WHERE key='trace_derived_v11')""").fetchone()
         if not complete:
             before = None
             while True:
@@ -645,6 +660,7 @@ class Store:
                     break
         if not complete:
             with self._connect() as db:
+                db.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('trace_derived_v12','1')")
                 db.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('trace_derived_v11','1')")
 
     def _backfill_endpoints(self):
@@ -676,37 +692,34 @@ class Store:
             db.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('endpoint_inventory_v1','1')")
 
     def _refresh_summaries(self, trace_ids):
-        updates = []
-        findings = []
-        replaced = []
+        with self._derived_lock:
+            self._refresh_summaries_locked(trace_ids)
+
+    def _refresh_summaries_locked(self, trace_ids):
+        from .storage_derived import derive_trace
+
         for trace_id in set(trace_ids):
-            trace = self.trace(trace_id)
-            summary = trace["summary"]
-            if summary is None:
-                continue
-            session_id = summary.get("session_id")
-            updates.append((trace_id, session_id, json.dumps(summary, separators=(",", ":")),
-                            json.dumps(trace["activity"], separators=(",", ":"))))
-            replaced.append((trace_id,))
-            evidence_logs = self._finding_logs(trace_id)
-            timestamp = max([span["end_unix_nano"] for span in trace["spans"]] +
-                            [log["time_unix_nano"] for log in evidence_logs] +
-                            ([trace["outcome"]["ingested_ns"]] if trace["outcome"] else []),
-                            default=summary["end_unix_nano"])
-            findings.extend((item["id"], trace_id, timestamp,
-                             json.dumps({**item, "time_unix_nano": timestamp}, separators=(",", ":")))
-                            for item in analyze(trace["spans"], evidence_logs, trace["outcome"]))
-        if updates or replaced:
             with self._connect() as db:
-                if updates:
-                    db.executemany("INSERT INTO trace_summaries(trace_id,session_id,summary_json,activity_json) VALUES(?,?,?,?) "
-                                   "ON CONFLICT(trace_id) DO UPDATE SET session_id=excluded.session_id,"
-                                   "summary_json=excluded.summary_json,activity_json=excluded.activity_json",
-                                   updates)
-                if replaced:
-                    db.executemany("DELETE FROM finding_cache WHERE trace_id=?", replaced)
-                    db.executemany("INSERT INTO finding_cache(finding_id,trace_id,time_ns,finding_json) "
-                                   "VALUES(?,?,?,?)", findings)
+                # A process-local lock cannot protect against another Store or
+                # collector process. Serialize source reads and cache replacement
+                # with retention (and ingestion) using SQLite's writer lock.
+                db.execute("BEGIN IMMEDIATE")
+                derived = derive_trace(db, trace_id)
+                if derived is None:
+                    db.execute("DELETE FROM trace_summaries WHERE trace_id=?", (trace_id,))
+                    db.execute("DELETE FROM finding_cache WHERE trace_id=?", (trace_id,))
+                    continue
+                summary, activity, findings, timestamp = derived
+                db.execute("INSERT INTO trace_summaries(trace_id,session_id,summary_json,activity_json) VALUES(?,?,?,?) "
+                           "ON CONFLICT(trace_id) DO UPDATE SET session_id=excluded.session_id,"
+                           "summary_json=excluded.summary_json,activity_json=excluded.activity_json",
+                           (trace_id, summary.get("session_id"), json.dumps(summary, separators=(",", ":")),
+                            json.dumps(activity, separators=(",", ":"))))
+                db.execute("DELETE FROM finding_cache WHERE trace_id=?", (trace_id,))
+                db.executemany("INSERT INTO finding_cache(finding_id,trace_id,time_ns,finding_json) VALUES(?,?,?,?)",
+                               ((item["id"], trace_id, timestamp,
+                                 json.dumps({**item, "time_unix_nano": timestamp}, separators=(",", ":")))
+                                for item in findings))
 
     def _refresh_after_write(self, trace_ids):
         trace_ids = set(trace_ids)
@@ -870,7 +883,7 @@ class Store:
                             "cache_read_input_tokens_reported": False,
                             "cache_write_input_tokens_reported": False,
                             "reasoning_output_tokens_reported": False,
-                            "known_cost_usd": 0.0, "unknown_cost_runs": 0}
+                            "known_cost_usd": 0.0, "unknown_cost_runs": 0, "usage_complete": True}
                    for bucket in range(first_bucket, last_bucket + 1, step_ns)}
         with self._connect() as db:
             summary_filters = ["a.last_ns>=?"]
@@ -932,6 +945,7 @@ class Store:
             if item is None:
                 continue
             item["runs"] += 1
+            item["usage_complete"] &= summary.get("usage_complete", True)
             item["errors"] += summary.get("status") in {"ERROR", "FAILED"}
             item["input_tokens"] += int(summary.get("input_tokens") or 0)
             item["output_tokens"] += int(summary.get("output_tokens") or 0)
@@ -943,7 +957,7 @@ class Store:
             item["input_tokens_reported"] |= bool(summary.get("input_tokens_reported"))
             item["output_tokens_reported"] |= bool(summary.get("output_tokens_reported"))
             item["known_cost_usd"] += float(summary.get("known_cost_usd") or 0)
-            if summary.get("models") and not summary.get("cost_complete", False):
+            if (summary.get("models") or not summary.get("usage_complete", True)) and not summary.get("cost_complete", False):
                 item["unknown_cost_runs"] += 1
         for row in log_rows:
             item = buckets.get(int(row["bucket"]))
@@ -959,6 +973,8 @@ class Store:
         points = list(buckets.values())
         for item in points:
             item["known_cost_usd"] = round(item["known_cost_usd"], 8)
+            from .storage_derived import finalize_usage
+            finalize_usage(item)
         return {"days": days, "step": step, "service": service, "session_id": session_id,
                 "points": points}
 
@@ -1017,6 +1033,10 @@ class Store:
 
     def prune(self, retention_days, now_ns=None):
         """Delete complete old traces and uncorrelated telemetry before a cutoff."""
+        with self._derived_lock:
+            return self._prune_locked(retention_days, now_ns)
+
+    def _prune_locked(self, retention_days, now_ns=None):
         if retention_days is None or not math.isfinite(float(retention_days)) or float(retention_days) <= 0:
             raise ValueError("retention_days must be positive")
         now_ns = time.time_ns() if now_ns is None else int(now_ns)
@@ -1464,7 +1484,7 @@ class Store:
                 execution_spans = db.execute(
                     f"""SELECT trace_id,span_id,start_ns,end_ns,attributes FROM spans
                         WHERE trace_id IN ({placeholders})
-                        AND json_extract(attributes,'$.\"gen_ai.tool.type\"')='MCPTool'
+                        AND lower(json_extract(attributes,'$.\"gen_ai.tool.type\"'))='mcptool'
                         AND json_extract(attributes,'$.\"gen_ai.tool.name\"') IS NOT NULL""",
                     call_trace_ids,
                 ).fetchall()
@@ -1526,6 +1546,9 @@ class Store:
         return {'calls': items, 'next_cursor': next_cursor, 'summary': summary}
 
     def ingest_metrics(self, points):
+        # We traverse points again to update endpoint inventory; accept one-shot
+        # iterators just as ingest() and ingest_logs() do.
+        points = list(points)
         rows = []
         for point in points:
             canonical = json.dumps(point, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -1698,7 +1721,17 @@ class Store:
             needle = "%" + query.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
             params.extend((needle, needle, needle, needle))
         if span_filter == "errors":
-            clauses.append("(status='ERROR' OR attributes LIKE '%\"error.type\"%' OR attributes LIKE '%\"exception.type\"%' OR attributes LIKE '%\"tool.error\"%' OR lower(attributes) LIKE '%\"tool.result_status\": \"error%' OR json_extract(attributes,'$.\"mcp.tool.is_error\"')=1 OR json_extract(attributes,'$.\"mcp.is_error\"')=1 OR json_extract(json_extract(attributes,'$.\"gcp.vertex.agent.tool_response\"'),'$.isError')=1 OR json_extract(json_extract(attributes,'$.\"gen_ai.tool.call.result\"'),'$.isError')=1)")
+            errors = ["status='ERROR'", "attributes LIKE '%\"error.type\"%'",
+                      "attributes LIKE '%\"exception.type\"%'", "attributes LIKE '%\"tool.error\"%'",
+                      "lower(attributes) LIKE '%\"tool.result_status\": \"error%'"]
+            errors.extend(f"json_extract(attributes,'$.\"{key}\"')=1"
+                          for key in ("mcp.tool.is_error", "mcp.is_error"))
+            for key in ("gcp.vertex.agent.tool_response", "gen_ai.tool.call.result"):
+                value = f"json_extract(attributes,'$.\"{key}\"')"
+                errors.append(f"CASE WHEN json_valid({value}) THEN "
+                              f"(json_extract({value},'$.isError')=1 OR "
+                              f"json_extract({value},'$.is_error')=1) ELSE 0 END")
+            clauses.append("(" + " OR ".join(errors) + ")")
         elif span_filter == "models":
             clauses.append("(attributes LIKE '%\"gen_ai.request.model\"%' OR attributes LIKE '%\"llm.response.model_name\"%' OR attributes LIKE '%\"llm.request.model_name\"%' OR attributes LIKE '%\"llm.model_name\"%' OR attributes LIKE '%\"embedding.model_name\"%' OR attributes LIKE '%\"llm.model\"%' OR attributes LIKE '%\"openinference.span.kind\": \"LLM\"%' OR attributes LIKE '%\"openinference.span.kind\": \"EMBEDDING\"%' OR lower(attributes) LIKE '%\"gen_ai.operation.name\": \"chat%' OR lower(attributes) LIKE '%\"gen_ai.operation.name\": \"text_completion%' OR lower(attributes) LIKE '%\"gen_ai.operation.name\": \"embeddings%')")
         elif span_filter == "tools":
@@ -1978,6 +2011,8 @@ class Store:
                 "last_unix_nano": row["last_ns"], "latest_status": "UNKNOWN",
                 "latest_task": None, "latest_waiting_for": None, "project": None})
             summary = json.loads(row["summary_json"])
+            item["usage_complete"] = item.get("usage_complete", True) and summary.get("usage_complete", True)
+            item["status_complete"] = item.get("status_complete", True) and summary.get("status_complete", True)
             if item["trace_count"] == 0:
                 item["latest_status"] = summary.get("status") or "UNKNOWN"
                 item["latest_task"] = summary.get("task")
@@ -2003,8 +2038,9 @@ class Store:
             cost_complete = bool(summary.get("cost_complete", False))
             item["unknown_cost_runs"] += not cost_complete
             item["cost_complete"] &= cost_complete
-            item["services"].update(summary.get("services", []))
-            item["models"].update(summary.get("models", []))
+            from .storage_derived import merge_labels
+            merge_labels(item, "services", summary.get("services", []), summary.get("services_complete", True))
+            merge_labels(item, "models", summary.get("models", []), summary.get("models_complete", True))
 
         # Some runtimes emit session-tagged events without trace context. Keep
         # those sessions visible in the roster instead of making Activity the
@@ -2121,6 +2157,8 @@ class Store:
         result = []
         for item in grouped.values():
             item["known_cost_usd"] = round(item["known_cost_usd"], 8)
+            from .storage_derived import finalize_usage
+            finalize_usage(item)
             item["services"] = sorted(item["services"])
             item["models"] = sorted(item["models"])
             result.append(item)
@@ -2259,7 +2297,8 @@ class Store:
                   "cache_write_input_tokens_reported": False,
                   "reasoning_output_tokens_reported": False,
                   "input_tokens_reported": False, "output_tokens_reported": False,
-                  "known_cost_usd": 0.0, "unknown_cost_runs": 0}
+                  "known_cost_usd": 0.0, "unknown_cost_runs": 0,
+                  "usage_complete": True, "status_complete": True}
         cursor = None
         while True:
             page = self.trace_page(limit=500, cursor=cursor)
@@ -2269,8 +2308,10 @@ class Store:
                 totals["incomplete"] += run["status"] == "INCOMPLETE"
                 totals["running"] += run["status"] == "RUNNING"
                 totals["spans"] += run["span_count"]
-                totals["input_tokens"] += run["input_tokens"]
-                totals["output_tokens"] += run["output_tokens"]
+                totals["usage_complete"] &= run.get("usage_complete", True)
+                totals["status_complete"] &= run.get("status_complete", True)
+                totals["input_tokens"] += run["input_tokens"] or 0
+                totals["output_tokens"] += run["output_tokens"] or 0
                 totals["cache_read_input_tokens"] += int(run.get("cache_read_input_tokens") or 0)
                 totals["cache_write_input_tokens"] += int(run.get("cache_write_input_tokens") or 0)
                 totals["reasoning_output_tokens"] += int(run.get("reasoning_output_tokens") or 0)
@@ -2278,7 +2319,7 @@ class Store:
                     totals[f"{field}_reported"] |= bool(run.get(f"{field}_reported"))
                 totals["input_tokens_reported"] |= bool(run.get("input_tokens_reported"))
                 totals["output_tokens_reported"] |= bool(run.get("output_tokens_reported"))
-                totals["known_cost_usd"] += run["known_cost_usd"]
+                totals["known_cost_usd"] += run["known_cost_usd"] or 0
                 totals["unknown_cost_runs"] += not run["cost_complete"]
             cursor = page["next_cursor"]
             if not cursor:
@@ -2328,6 +2369,8 @@ class Store:
                 "metric_points": self._metric_count(),
                 "services": self._services()}
         )
+        from .storage_derived import finalize_usage
+        finalize_usage(totals)
         return totals
 
     def _log_count(self):
