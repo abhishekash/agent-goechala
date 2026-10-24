@@ -145,6 +145,7 @@ priority above is closed.
 | Export | Added (`x`) | Frozen privacy preview, explicit confirmation, owner-only new files, no overwrites, coverage disclaimer, selected/loaded evidence only |
 | Narrow tables | Improved | Column drop order prioritizes subject/status; full records remain in the inspector |
 | AI evidence | Honest about partial data | Completeness flags reach the provider prompt; unknown totals stay `null` |
+| ADK schema drift | Fixed | Accept `McpTool`/`MCPTool` case-insensitively; the interoperability test reflects ADK releases that omit tool arguments/results from spans instead of inventing them |
 
 Measured on this workstation with `scripts/benchmark_app.py --idle-seconds 10`
 (Python 3.13.5, Linux, synthetic data, temporary database, all views warmed):
@@ -190,18 +191,19 @@ storage tradeoff, not a free optimization.
 
 ## Review boundaries
 
-Validation: the final combined run
-(`uv run --with cairosvg --with pillow --with imageio-ffmpeg python -m unittest discover -s tests -q`)
-completed **257 tests**, with **9 skips**, in about 308 seconds. Focused
-storage, feed-concurrency, receiver, native-budget, UI, export, and coverage
-suites were also run after their final edits. `git diff --check` and
-`compileall` pass. The regenerated GIF's logo and Prompts scene were visually
-checked; `scripts/benchmark_app.py` ran all three synthetic workloads in fresh
-processes with temporary databases.
+Validation: CI passed on Python 3.11–3.14, including the full suite, both Node
+versions, and every SDK/OTLP interoperability job. The last complete local run
+covered **257 tests**, with **9 skips**, before the final ADK schema regression
+was added; that regression and the ADK e2e job pass in CI. Focused storage,
+feed-concurrency, receiver, native-budget, UI, export, and coverage suites were
+also run after their final edits. `git diff --check` and `compileall` pass. The
+regenerated GIF's logo and Prompts scene were visually checked;
+`scripts/benchmark_app.py` ran all three synthetic workloads in fresh processes
+with temporary databases.
 
 This review used the local checkout of the linked repository, synthetic data,
 source inspection, and headless terminal tests. It did not inspect personal
 session records or benchmark production workloads. Real terminal rendering,
-clipboard support, multi-process retention, and all optional SDK integrations
-still need platform-specific validation. Changes are local; no release or push
-is implied.
+clipboard support, and platform-specific package behavior still need
+platform-specific validation. The changes are on
+`review/hardening-ux-performance` and PR #18, not on `main` until merged.
